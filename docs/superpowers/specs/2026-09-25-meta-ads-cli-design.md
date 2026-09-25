@@ -242,8 +242,9 @@ deadline. Shell completion comes from cobra.
   `init`, `--check` or `refresh` (`never` for a non-expiring token), and `missing` plus `hint` when
   the configuration cannot make a call. Never a token or a secret.
 - **`metaads auth status --check`:** with app ID and secret, calls `GET /debug_token` with the app
-  token `<app_id>|<app_secret>` and adds `is_valid`, `expires_at`, `scopes` and the ad accounts in
-  `granular_scopes`; it records the expiry in the config file. Without them it calls
+  token `<app_id>|<app_secret>`, adds `is_valid`, `scopes` and `ad_accounts` (the ad accounts in
+  `granular_scopes`) and updates `token_expires_at`; it records the expiry in the config file when
+  the token comes from there. Without them it calls
   `GET /me?fields=id,name` and reports validity only.
 - **`metaads auth refresh`:** needs app ID and secret and a token stored in the config file. Calls
   `GET /oauth/access_token` with `grant_type=fb_exchange_token`, `client_id`, `client_secret`,
@@ -418,7 +419,8 @@ lives, happens in that workspace and is not part of this repository.
   status when a response exists. `details` is Meta's `error` object. `request_id` is its
   `fbtrace_id`, or the `x-fb-trace-id` response header, and is omitted when absent.
 - **Kinds:** `auth`, `forbidden`, `not_found`, `validation`, `rate_limited`, `server`, `transport`,
-  `outcome_unknown`, `incomplete`, `usage`.
+  `outcome_unknown`, `incomplete`, `usage`, and `output_failed` (the call succeeded, but `--output`
+  or stdout could not take the response), as in `google-ads-cli`.
 - **Mapping by Meta error code first**, because Meta answers almost every error with HTTP 400:
 
   | Meta code | Kind |
