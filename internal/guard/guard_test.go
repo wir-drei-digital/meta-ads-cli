@@ -218,3 +218,65 @@ func TestRules(t *testing.T) {
 		t.Fatal("Rules must return a copy")
 	}
 }
+
+func TestFieldNames(t *testing.T) {
+	const reason = "is refused: parameter names are lowercase letters, digits and underscores; " +
+		"Meta could read brackets or dots as nested fields the guard does not see"
+	for _, k := range []string{"campaign_spec[daily_budget]", "adset_budgets[0][daily_budget]", "daily.budget", "daily budget", "Status", ""} {
+		body := `{"status":"PAUSED","` + k + `":"99999999"}`
+		check(t, "body key "+k, force(post(t, "act/adsets", body)), pol(), want{err: `field "` + k + `" ` + reason})
+	}
+	del := Request{Verb: "DELETE", Route: rt(t, "act/campaigns", "DELETE"), Params: url.Values{"delete.strategy": {"DELETE_ANY"}}}
+	check(t, "delete param delete.strategy", force(del), pol(), want{err: `parameter "delete.strategy" ` + reason})
+	get := Request{Verb: "GET", Route: rt(t, "me", "GET"), Params: url.Values{"Method": {"post"}}}
+	check(t, "get param Method", get, pol(), want{err: `parameter "Method" ` + reason})
+	files := post(t, "act/adimages", `{}`)
+	files.Files = []string{"image[0]"}
+	check(t, "file image[0]", files, pol(), want{err: `--file "image[0]" ` + reason})
+
+	allowed := `{"name":"c","objective":"OUTCOME_SALES","status":"PAUSED","special_ad_categories":[],` +
+		`"is_adset_budget_sharing_enabled":false,"bid_strategy":"LOWEST_COST_WITHOUT_CAP"}`
+	check(t, "plain names", post(t, "act/campaigns", allowed), pol(), want{class: Write})
+	check(t, "status_option", post(t, "123/copies", `{"status_option":"PAUSED"}`), pol(), want{class: Write})
+	check(t, "nested keys are not form fields", post(t, "act/ads",
+		`{"status":"PAUSED","adset_spec":{"status":"PAUSED","targeting":{"Geo.Locations[0]":1}},`+
+			`"creative":"{\"object_story_spec\":{\"Page Id\":\"1\"}}"}`), pol(), want{class: Write})
+	if Rules().Refused["name outside "+namePattern] == "" {
+		t.Fatal("the catalog must publish the name rule")
+	}
+}
+
+func TestDeleteParams(t *testing.T) {
+	del := func(params url.Values) Request {
+		return Request{Verb: "DELETE", Route: rt(t, "123", "DELETE"), Params: params}
+	}
+	check(t, "budget above cap", force(del(url.Values{"daily_budget": {"99999999"}})), pol(), want{err: "daily_budget 99999999: exceeds"})
+	check(t, "lifetime budget without a cap", force(del(url.Values{"lifetime_budget": {"100"}})), noCaps(pol()), want{err: "no lifetime-budget-cap is configured"})
+	check(t, "amount form", force(del(url.Values{"daily_budget": {"30.00"}})), pol(), want{err: "whole number in the account currency's minor unit"})
+	check(t, "nested spec above cap", force(del(url.Values{"adset_spec": {`{"status":"PAUSED","daily_budget":5000}`}})), pol(), want{err: "adset_spec.daily_budget 5000: exceeds"})
+	check(t, "nested spec unparseable", force(del(url.Values{"adset_spec": {`{`}})), pol(), want{err: "adset_spec: is a string that is not a JSON object"})
+	check(t, "adset_budgets above cap", force(del(url.Values{"adset_budgets": {`[{"adset_id":"9","daily_budget":4000}]`}})), pol(), want{err: "adset_budgets[0].daily_budget 4000: exceeds"})
+	check(t, "buying_type", force(del(url.Values{"buying_type": {"RESERVED"}})), pol(), want{err: `buying_type "RESERVED" is refused`})
+	check(t, "repeated parameter", force(del(url.Values{"daily_budget": {"100", "99999999"}})), pol(), want{err: "daily_budget is given more than once"})
+	check(t, "plain parameter", force(Request{Verb: "DELETE", Route: rt(t, "act/adimages", "DELETE"), Params: url.Values{"hash": {"abc"}}}), pol(), want{class: Delete})
+
+	d, err := Check(force(del(url.Values{"daily_budget": {"100"}})), pol())
+	if err != nil || d.Class != Delete || len(d.Findings) != 2 || !strings.Contains(d.Findings[1], "daily_budget 100 changes the budget") {
+		t.Fatalf("a budget within the cap on a forced delete adds a spend finding and stays delete: %+v %v", d, err)
+	}
+	_, err = Check(del(url.Values{"status": {"ACTIVE"}}), pol())
+	if err == nil || !strings.Contains(err.Error(), "needs --force") ||
+		!strings.Contains(err.Error(), "DELETE removes what the path names") || !strings.Contains(err.Error(), `status "ACTIVE"`) {
+		t.Fatalf("every finding must be named: %v", err)
+	}
+}
+
+func TestPostParams(t *testing.T) {
+	r := post(t, "123", `{"name":"x"}`)
+	r.Params = url.Values{"daily_budget": {"99999999"}}
+	check(t, "post with a parameter", r, pol(), want{err: "post takes no query parameters; put every field in --data"})
+	r.Params = url.Values{"method": {"delete"}}
+	check(t, "post with an owned parameter", force(r), pol(), want{err: "post takes no query parameters"})
+	r.Params = url.Values{}
+	check(t, "post with empty parameters", r, pol(), want{class: Write})
+}

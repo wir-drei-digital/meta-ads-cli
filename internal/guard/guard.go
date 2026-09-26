@@ -47,6 +47,10 @@ type Decision struct {
 // Check classifies req and applies the gates. A non-nil error is the reason
 // nothing may be sent; the CLI reports it as a usage error.
 func Check(req Request, pol Policy) (Decision, error) {
+	// Meta merges query parameters into a POST body; the guard reads --data only.
+	if req.Verb == "POST" && len(req.Params) > 0 {
+		return Decision{}, fmt.Errorf("post takes no query parameters; put every field in --data")
+	}
 	if err := checkOwned(req); err != nil {
 		return Decision{}, err
 	}
@@ -54,12 +58,23 @@ func Check(req Request, pol Policy) (Decision, error) {
 	switch req.Verb {
 	case "GET":
 	case "DELETE":
+		fields := make(map[string]any, len(req.Params))
 		for _, k := range sortedParams(req.Params) {
 			if reason, ok := refusedFields[k]; ok {
 				return Decision{}, fmt.Errorf("%s is refused: %s", k, reason)
 			}
+			if len(req.Params[k]) > 1 {
+				return Decision{}, fmt.Errorf("parameter %s is given more than once; %s", k, repeatedReason)
+			}
+			fields[k] = req.Params.Get(k)
 		}
+		// Delete first: a spend finding below shares its rank and must not
+		// rename the class.
 		c.add(Delete, "DELETE removes what the path names")
+		// The field checks apply to delete parameters as to a POST update.
+		if err := c.object(fields, "", scopeUpdate); err != nil {
+			return Decision{}, err
+		}
 	case "POST":
 		if err := c.post(req); err != nil {
 			return Decision{}, err
@@ -81,10 +96,14 @@ func Check(req Request, pol Policy) (Decision, error) {
 	return d, nil
 }
 
-// checkOwned refuses the parameters the CLI owns at the top level of what is
-// sent, and --file names that would carry a field the guard reads.
+// checkOwned refuses, at the top level of what is sent, names outside
+// namePattern, the parameters the CLI owns, and --file names that would
+// carry a field the guard reads.
 func checkOwned(req Request) error {
 	for _, k := range sortedParams(req.Params) {
+		if !plainName.MatchString(k) {
+			return fmt.Errorf("parameter %q is refused: %s", k, nameReason)
+		}
 		if reason, ok := ownedParams[k]; ok {
 			return fmt.Errorf("parameter %s is refused: %s", k, reason)
 		}
@@ -93,11 +112,17 @@ func checkOwned(req Request) error {
 		}
 	}
 	for _, k := range sortedKeys(req.Body) {
+		if !plainName.MatchString(k) {
+			return fmt.Errorf("field %q is refused: %s", k, nameReason)
+		}
 		if reason, ok := ownedParams[k]; ok {
 			return fmt.Errorf("field %s is refused: %s", k, reason)
 		}
 	}
 	for _, f := range req.Files {
+		if !plainName.MatchString(f) {
+			return fmt.Errorf("--file %q is refused: %s", f, nameReason)
+		}
 		if reason, ok := ownedParams[f]; ok {
 			return fmt.Errorf("--file %s is refused: %s", f, reason)
 		}

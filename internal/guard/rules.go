@@ -2,6 +2,7 @@ package guard
 
 import (
 	"maps"
+	"regexp"
 	"sort"
 )
 
@@ -65,6 +66,18 @@ const (
 	buyingTypeReason      = "reserved buying commits spend the budget cap cannot check; only AUCTION is allowed"
 )
 
+// namePattern is the only shape a top-level form field name may take: the
+// Graph API uses snake_case only. Keys inside nested JSON values are not
+// form fields and are not held to it.
+const namePattern = `^[a-z0-9_]+$`
+
+var plainName = regexp.MustCompile(namePattern)
+
+const (
+	nameReason     = "parameter names are lowercase letters, digits and underscores; Meta could read brackets or dots as nested fields the guard does not see"
+	repeatedReason = "the guard and Meta could read different values"
+)
+
 // ownedParams are set by the CLI or change how Meta reads a request; they
 // are refused in --data, --param and --file.
 var ownedParams = map[string]string{
@@ -108,8 +121,10 @@ type Catalog struct {
 // Rules returns a copy of the rule table.
 func Rules() Catalog {
 	refused := map[string]string{
-		"field spend_cap on the ad account":    accountSpendCapReason,
-		"field buying_type other than AUCTION": buyingTypeReason,
+		"field spend_cap on the ad account":     accountSpendCapReason,
+		"field buying_type other than AUCTION":  buyingTypeReason,
+		"name outside " + namePattern:           nameReason,
+		"delete parameter given more than once": repeatedReason,
 	}
 	for k, v := range refusedEdges {
 		refused["edge "+k] = v
