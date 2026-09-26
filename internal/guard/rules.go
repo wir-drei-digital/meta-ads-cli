@@ -4,6 +4,8 @@ import (
 	"maps"
 	"regexp"
 	"sort"
+
+	"github.com/wir-drei-digital/meta-ads-cli/internal/route"
 )
 
 // Risk classes. delete, spend and admin need --force.
@@ -46,25 +48,40 @@ var createEdges = map[string]bool{"campaigns": true, "adsets": true, "ads": true
 // execution_options=["validate_only"].
 var validateOnlyEdges = map[string]bool{"campaigns": true, "adsets": true, "ads": true, "adcreatives": true}
 
-// refusedEdges are refused whatever the flags.
-var refusedEdges = map[string]string{
-	"budget_schedules":          "high-demand periods raise a daily budget up to 8 times, outside the budget cap",
-	"adrules_library":           "automated rules change budgets and status later, outside any check",
-	"reachfrequencypredictions": "reserved buying commits spend the budget cap cannot check",
-	"async_batch_requests":      "batch requests are not supported in v1; send the requests one by one",
-}
-
-// refusedFields are refused wherever they appear.
-var refusedFields = map[string]string{
-	"budget_schedule_specs": "high-demand periods raise a daily budget up to 8 times, outside the budget cap",
-	"delete_strategy":       "bulk deletion removes every campaign, ad set or ad that matches a strategy",
-	"spend_cap_action":      "the account spending limit belongs to a person; reset frees headroom by zeroing the amount spent",
-}
-
 const (
 	accountSpendCapReason = "the account spending limit belongs to a person; change it in the Business Portfolio's billing settings"
 	buyingTypeReason      = "reserved buying commits spend the budget cap cannot check; only AUCTION is allowed"
+	budgetScheduleReason  = "high-demand periods raise a daily budget up to 8 times, outside the budget cap"
+	adRulesReason         = "automated rules change budgets and status later, outside any check"
+	batchReason           = "bulk and batch requests are not supported in v1; send the requests one by one"
 )
+
+// refusedEdges are refused whatever the flags. route.Parse holds post and
+// delete edges to Meta's lowercase spelling, so this exact match cannot be
+// sidestepped with capitals.
+var refusedEdges = map[string]string{
+	"budget_schedules":          budgetScheduleReason,
+	"adrules_library":           adRulesReason,
+	"reachfrequencypredictions": "reserved buying commits spend the budget cap cannot check",
+	"async_batch_requests":      batchReason,
+	"asyncadrequestsets":        batchReason, // creates ads in bulk from ad_specs the guard does not read
+}
+
+// refusedFields are refused wherever they appear. POST /<id> cannot see the
+// object type, so an existing automated rule (execution_spec,
+// evaluation_spec, schedule_spec) or budget schedule (budget_value,
+// budget_value_type) would be edited like a campaign; their fields are
+// refused as the edges that create them are.
+var refusedFields = map[string]string{
+	"budget_schedule_specs": budgetScheduleReason,
+	"budget_value":          budgetScheduleReason,
+	"budget_value_type":     budgetScheduleReason,
+	"evaluation_spec":       adRulesReason,
+	"execution_spec":        adRulesReason,
+	"schedule_spec":         adRulesReason,
+	"delete_strategy":       "bulk deletion removes every campaign, ad set or ad that matches a strategy",
+	"spend_cap_action":      "the account spending limit belongs to a person; reset frees headroom by zeroing the amount spent",
+}
 
 // namePattern is the only shape a top-level form field name may take: the
 // Graph API uses snake_case only. Keys inside nested JSON values are not
@@ -94,9 +111,9 @@ var ownedParams = map[string]string{
 
 // inspected are the fields the checks read. A --file part carries bytes the
 // guard does not read, so it may not use one of these names.
-var inspected = []string{"adset_budgets", "adset_spec", "budget_schedule_specs", "buying_type", "campaign_spec",
-	"configured_status", "daily_budget", "delete_strategy", "lifetime_budget", "spend_cap", "spend_cap_action",
-	"status", "status_option"}
+var inspected = []string{"adset_budgets", "adset_spec", "budget_schedule_specs", "budget_value", "budget_value_type",
+	"buying_type", "campaign_spec", "configured_status", "daily_budget", "delete_strategy", "evaluation_spec",
+	"execution_spec", "lifetime_budget", "schedule_spec", "spend_cap", "spend_cap_action", "status", "status_option"}
 
 // nestedSpecs are objects inside a body that create what they describe.
 var nestedSpecs = []string{"campaign_spec", "adset_spec"}
@@ -121,10 +138,11 @@ type Catalog struct {
 // Rules returns a copy of the rule table.
 func Rules() Catalog {
 	refused := map[string]string{
-		"field spend_cap on the ad account":     accountSpendCapReason,
-		"field buying_type other than AUCTION":  buyingTypeReason,
-		"name outside " + namePattern:           nameReason,
-		"delete parameter given more than once": repeatedReason,
+		"field spend_cap on the ad account":                     accountSpendCapReason,
+		"field buying_type other than AUCTION":                  buyingTypeReason,
+		"name outside " + namePattern:                           nameReason,
+		"delete parameter given more than once":                 repeatedReason,
+		"post or delete edge outside " + route.WriteEdgePattern: route.WriteEdgeReason,
 	}
 	for k, v := range refusedEdges {
 		refused["edge "+k] = v

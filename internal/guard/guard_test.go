@@ -2,6 +2,7 @@ package guard
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 
@@ -136,7 +137,7 @@ func TestSpendFieldsAndRefusals(t *testing.T) {
 	check(t, "reserved buying", force(post(t, "act/campaigns", `{"status":"PAUSED","buying_type":"RESERVED"}`)), pol(), want{err: "buying_type \"RESERVED\" is refused"})
 	check(t, "auction buying", post(t, "act/campaigns", `{"status":"PAUSED","buying_type":"AUCTION"}`), pol(), want{class: Write})
 	check(t, "bids stay write", post(t, "123", `{"bid_amount":150,"bid_strategy":"COST_CAP","targeting":{"geo_locations":{"countries":["CH"]}}}`), pol(), want{class: Write})
-	for _, edge := range []string{"budget_schedules", "adrules_library", "reachfrequencypredictions", "async_batch_requests"} {
+	for _, edge := range []string{"budget_schedules", "adrules_library", "reachfrequencypredictions", "async_batch_requests", "asyncadrequestsets"} {
 		node := "act"
 		if edge == "budget_schedules" {
 			node = "123"
@@ -210,6 +211,7 @@ func TestRules(t *testing.T) {
 	if r.PostEdges["campaigns"] != Write || r.PostEdges["insights"] != Read || r.DefaultPostEdge != Admin ||
 		r.Refused["field delete_strategy"] == "" || r.Refused["edge adrules_library"] == "" ||
 		r.Refused["field spend_cap on the ad account"] == "" || r.OwnedParams["method"] == "" ||
+		r.Refused["post or delete edge outside ^[a-z0-9_]+$"] == "" ||
 		strings.Join(r.ValidateOnlyEdges, ",") != "adcreatives,ads,adsets,campaigns" {
 		t.Fatalf("%+v", r)
 	}
@@ -294,4 +296,56 @@ func TestDeleteAccountSpendCap(t *testing.T) {
 		t.Fatalf("a campaign spend_cap on a delete is a spend finding: %+v %v", d, err)
 	}
 	check(t, "spend_cap on DELETE act/adimages", del("act/adimages"), pol(), want{class: Delete})
+}
+
+// POST /<id> cannot see the object type, so an existing automated rule or
+// budget schedule (high-demand period) is reached with the same verb as a
+// campaign. The fields that make them change budgets later are refused
+// wherever they appear, whatever the flags.
+func TestRuleAndScheduleFieldsRefused(t *testing.T) {
+	const rules = "automated rules change budgets and status later, outside any check"
+	const schedules = "high-demand periods raise a daily budget up to 8 times, outside the budget cap"
+	for _, c := range []struct{ name, body, err string }{
+		{"execution_spec", `{"execution_spec":{"execution_type":"CHANGE_BUDGET","execution_options":[{"field":"change_spec","value":{"amount":100,"unit":"PERCENTAGE"},"operator":"EQUAL"}]}}`,
+			"execution_spec is refused: " + rules},
+		{"schedule_spec", `{"schedule_spec":{"schedule_type":"SEMI_HOURLY"}}`, "schedule_spec is refused: " + rules},
+		{"budget_value", `{"budget_value":800,"budget_value_type":"MULTIPLIER"}`, "budget_value is refused: " + schedules},
+		{"evaluation_spec", `{"evaluation_spec":{"evaluation_type":"SCHEDULE"}}`, "evaluation_spec is refused: " + rules},
+		{"budget_value_type", `{"budget_value_type":"ABSOLUTE"}`, "budget_value_type is refused: " + schedules},
+	} {
+		check(t, c.name, post(t, "123", c.body), pol(), want{err: c.err})
+		check(t, c.name+" forced", force(post(t, "123", c.body)), pol(), want{err: c.err})
+	}
+	check(t, "nested", force(post(t, "act/ads", `{"status":"PAUSED","adset_spec":{"status":"PAUSED","budget_value":800}}`)), pol(),
+		want{err: "adset_spec.budget_value is refused"})
+	del := Request{Verb: "DELETE", Route: rt(t, "123", "DELETE"), Params: url.Values{"schedule_spec": {`{"schedule_type":"DAILY"}`}}}
+	check(t, "delete parameter", force(del), pol(), want{err: "schedule_spec is refused"})
+	files := post(t, "act/adimages", `{}`)
+	for _, f := range []string{"budget_value", "budget_value_type", "evaluation_spec", "execution_spec", "schedule_spec"} {
+		files.Files = []string{f}
+		check(t, "--file "+f, force(files), pol(), want{err: "--file " + f + " is refused"})
+		if Rules().Refused["field "+f] == "" || !slices.Contains(Rules().FileFieldsRefused, f) {
+			t.Errorf("the catalog must publish %s as refused, also as a --file name", f)
+		}
+	}
+}
+
+// Every refused field is also refused as a --file name: a file part would
+// carry it unread.
+func TestRefusedFieldsAreInspected(t *testing.T) {
+	for k := range refusedFields {
+		if !slices.Contains(inspected, k) {
+			t.Errorf("refused field %s is missing from inspected", k)
+		}
+	}
+}
+
+// asyncadrequestsets creates ads in bulk from ad_specs the guard never reads.
+func TestAsyncAdRequestSetsRefused(t *testing.T) {
+	body := `{"name":"bulk","ad_specs":[{"name":"a","adset_spec":{"status":"ACTIVE","daily_budget":9999999},"creative":{"creative_id":"1"},"status":"ACTIVE"}]}`
+	check(t, "asyncadrequestsets", force(post(t, "act/asyncadrequestsets", body)), pol(),
+		want{err: "the asyncadrequestsets edge is refused: bulk and batch requests are not supported in v1; send the requests one by one"})
+	if Rules().Refused["edge asyncadrequestsets"] == "" {
+		t.Fatal("the catalog must publish the asyncadrequestsets refusal")
+	}
 }

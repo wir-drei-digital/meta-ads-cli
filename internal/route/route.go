@@ -2,7 +2,8 @@
 // [vNN.N/]<node>[/<edge>], where the node "act" stands for the configured ad
 // account. Everything the CLI sends besides the path comes from flags, so a
 // path carries no query string, fragment, escape or whitespace: the guard
-// must see every field that is sent.
+// must see every field that is sent. A write's edge is spelt as Meta names
+// it, lowercase snake_case, because the guard matches edges exactly.
 package route
 
 import (
@@ -30,11 +31,20 @@ func (r Route) Path() string {
 // IsAccount reports whether the node is an ad account (act_<digits>).
 func (r Route) IsAccount() bool { return accountRe.MatchString(r.Node) }
 
+// WriteEdgePattern is the only shape an edge may take for POST and DELETE.
+// Meta's edges are lowercase snake_case; the guard looks edges up verbatim,
+// so Budget_Schedules would otherwise miss the refusal of budget_schedules.
+const WriteEdgePattern = `^[a-z0-9_]+$`
+
+// WriteEdgeReason is why another spelling is refused.
+const WriteEdgeReason = "Meta's edges are lowercase snake_case, and the guard matches an edge exactly; another spelling could miss its rule"
+
 var (
-	versionRe = regexp.MustCompile(`^v[0-9]+\.[0-9]+$`)
-	segmentRe = regexp.MustCompile(`^[A-Za-z0-9_:-]+$`)
-	accountRe = regexp.MustCompile(`^act_[0-9]+$`)
-	objectRe  = regexp.MustCompile(`^[0-9]+$`)
+	writeEdgeRe = regexp.MustCompile(WriteEdgePattern)
+	versionRe   = regexp.MustCompile(`^v[0-9]+\.[0-9]+$`)
+	segmentRe   = regexp.MustCompile(`^[A-Za-z0-9_:-]+$`)
+	accountRe   = regexp.MustCompile(`^act_[0-9]+$`)
+	objectRe    = regexp.MustCompile(`^[0-9]+$`)
 )
 
 // Parse reads path for verb (GET, POST or DELETE). account is the configured
@@ -44,6 +54,7 @@ var (
 // GET accepts any node. POST and DELETE need an ad account or an object ID
 // as the node, and an ad account must be the configured one: writes never
 // reach another account, whose currency the budget caps know nothing about.
+// Their edge must match WriteEdgePattern; GET keeps the wider grammar.
 func Parse(path, verb, account, defaultVersion string) (Route, error) {
 	p := strings.TrimPrefix(strings.TrimSpace(path), "/")
 	if p == "" {
@@ -77,6 +88,10 @@ func Parse(path, verb, account, defaultVersion string) (Route, error) {
 	}
 	if verb == "GET" {
 		return r, nil
+	}
+	if r.Edge != "" && !writeEdgeRe.MatchString(r.Edge) {
+		return Route{}, fmt.Errorf("%s edge %q is refused: an edge for post and delete must match %s; %s",
+			verb, r.Edge, WriteEdgePattern, WriteEdgeReason)
 	}
 	switch {
 	case accountRe.MatchString(r.Node):

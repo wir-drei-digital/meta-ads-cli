@@ -37,6 +37,20 @@ func TestParse(t *testing.T) {
 		{"me/adaccounts", "POST", "1", "", "needs act, act_<id> or an object ID"},
 		{"120330000000", "DELETE", "1", "v26.0/120330000000", ""},
 		{"act/adimages", "DELETE", "1", "v26.0/act_1/adimages", ""},
+		// Writes need Meta's own spelling of an edge: the guard's edge
+		// table is matched exactly, so a capitalised refused edge would
+		// otherwise fall through to admin.
+		{"123/Budget_Schedules", "POST", "1", "", "^[a-z0-9_]+$"},
+		{"act/AdRules_Library", "POST", "1", "", "^[a-z0-9_]+$"},
+		{"act/Async_Batch_Requests", "POST", "1", "", "^[a-z0-9_]+$"},
+		{"act/ReachFrequencyPredictions", "POST", "1", "", "^[a-z0-9_]+$"},
+		{"act/budget-schedules", "POST", "1", "", "^[a-z0-9_]+$"},
+		{"123/a:b", "POST", "1", "", "^[a-z0-9_]+$"},
+		{"act/Campaigns", "DELETE", "1", "", "^[a-z0-9_]+$"},
+		{"123/AdLabels", "DELETE", "1", "", "^[a-z0-9_]+$"},
+		{"act/Campaigns", "GET", "1", "v26.0/act_1/Campaigns", ""},
+		{"123/Budget_Schedules", "GET", "1", "v26.0/123/Budget_Schedules", ""},
+		{"me/a:b-c", "GET", "1", "v26.0/me/a:b-c", ""},
 	} {
 		r, err := Parse(c.path, c.verb, c.account, "v26.0")
 		if c.err == "" {

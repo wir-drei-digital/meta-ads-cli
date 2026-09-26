@@ -292,3 +292,24 @@ func TestDataFromStdinAndOutputFile(t *testing.T) {
 		t.Fatalf("form %v file %q stdout %q", g.all()[0].Form, got, out)
 	}
 }
+
+// A capitalised edge is refused for post and delete before anything is
+// sent, --force or not: the guard matches edges exactly.
+func TestWriteEdgeSpellingRefused(t *testing.T) {
+	g := newFakeGraph(t, nil)
+	for _, args := range [][]string{
+		{"post", "123/Budget_Schedules", "--force", "--data", `{}`},
+		{"post", "act/AdRules_Library", "--force"},
+		{"post", "act/Async_Batch_Requests", "--force"},
+		{"post", "act/ReachFrequencyPredictions", "--force"},
+		{"delete", "act/Campaigns", "--force", "--param", "delete_strategy=DELETE_ANY"},
+	} {
+		a, _, errb := testApp(t, g, defaultRes())
+		if code := a.run(args); code != 2 || !strings.Contains(errJSON(t, errb)["error"].(string), "^[a-z0-9_]+$") {
+			t.Fatalf("%v: exit %d %s", args, code, errb)
+		}
+	}
+	if len(g.all()) != 0 {
+		t.Fatalf("%d requests were sent", len(g.all()))
+	}
+}
