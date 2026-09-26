@@ -3,7 +3,9 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -319,5 +321,48 @@ func TestVerboseNeverLogsQuery(t *testing.T) {
 	c.Do(ctx, Request{Method: "GET", Path: "v26.0/debug_token", Query: url.Values{"input_token": {"SECRET-INPUT"}}, Class: ClassRead})
 	if strings.Contains(log.String(), "SECRET-INPUT") || strings.Contains(log.String(), "appsecret_proof") || !strings.Contains(log.String(), "GET v26.0/debug_token") {
 		t.Fatalf("verbose log: %q", log.String())
+	}
+}
+
+// A redirecting hop can echo the request URI, query and all, in Location and
+// in the body. The refusal names the target's scheme, host and path only and
+// carries no details, so appsecret_proof, input_token, client_secret and
+// fb_exchange_token never reach the printed error.
+func TestRedirectRefusalLeaksNoQuery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://SECRET-USER:SECRET-PASS@evil.example"+r.URL.RequestURI()+"#SECRET-FRAG")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusFound)
+		fmt.Fprintf(w, `{"moved_to":%q}`, r.URL.RequestURI())
+	}))
+	t.Cleanup(srv.Close)
+	c := newClient(srv.URL, nil)
+	c.AppSecret = "the-app-secret"
+	q := url.Values{"input_token": {"SECRET-INPUT"}, "client_secret": {"SECRET-CLIENT"}, "fb_exchange_token": {"SECRET-EXCHANGE"}}
+	_, err := c.Do(ctx, Request{Method: "GET", Path: "v26.0/oauth/access_token", Query: q, Class: ClassRead})
+	e := apiErr(t, err)
+	if e.Kind != KindValidation || e.Status != http.StatusFound || e.Details != nil ||
+		!strings.Contains(e.Message, `redirect to "https://evil.example/v26.0/oauth/access_token" refused`) {
+		t.Fatalf("%s %d %#v %s", e.Kind, e.Status, e.Details, e.Message)
+	}
+	raw, _ := json.Marshal(e)
+	for _, leak := range []string{"?", "client_secret", "input_token", "appsecret_proof", "fb_exchange_token", "SECRET"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("the error leaks %q: %s", leak, raw)
+		}
+	}
+}
+
+func TestRedirectRefusalUnparseableLocation(t *testing.T) {
+	for loc, want := range map[string]string{
+		"https://evil.example/%zz?input_token=SECRET-INPUT": "redirect to an unparseable Location refused",
+		"": "redirect to an empty Location refused",
+	} {
+		srv, _ := server(t, fail(http.StatusMovedPermanently, `input_token=SECRET-INPUT`, map[string]string{"Location": loc}))
+		_, err := newClient(srv.URL, nil).Do(ctx, Request{Method: "GET", Path: "v26.0/me", Class: ClassRead})
+		e := apiErr(t, err)
+		if !strings.Contains(e.Message, want) || strings.Contains(e.Message, "SECRET") || e.Details != nil {
+			t.Errorf("%q: %s %#v", loc, e.Message, e.Details)
+		}
 	}
 }

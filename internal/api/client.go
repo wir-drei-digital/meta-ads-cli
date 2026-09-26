@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -136,6 +137,42 @@ func (c *Client) guard(r Request) *Error {
 // same-host https to http hop, and a 307/308 would replay a write.
 func refuseRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
+// heldLocation carries a 3xx response's Location past net/http.
+const heldLocation = "X-Metaads-Held-Location"
+
+// holdRedirects hides the Location of a 3xx response from net/http. The
+// client parses Location before it asks CheckRedirect, and one it cannot
+// parse fails the call with an error that quotes it, query and all. Without
+// a Location the client hands the 3xx back untouched, and Do refuses it.
+type holdRedirects struct{ next http.RoundTripper }
+
+func (t holdRedirects) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err != nil || resp.StatusCode < 300 || resp.StatusCode >= 400 || resp.Header == nil {
+		return resp, err
+	}
+	resp.Header.Del(heldLocation)
+	if loc := resp.Header.Values("Location"); len(loc) > 0 {
+		resp.Header[heldLocation] = loc
+		resp.Header.Del("Location")
+	}
+	return resp, nil
+}
+
+// redirectTarget names where a redirect points by scheme, host and path
+// only: a hop that echoes the request URI would otherwise print
+// appsecret_proof, input_token, client_secret or fb_exchange_token.
+func redirectTarget(loc string) string {
+	if loc == "" {
+		return "an empty Location"
+	}
+	u, err := url.Parse(loc)
+	if err != nil {
+		return "an unparseable Location"
+	}
+	return strconv.Quote((&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path}).String())
+}
+
 // stripURL drops the URL from a transport error. Its query can carry
 // appsecret_proof, debug_token's input token or the exchange's client
 // secret, and the message is printed.
@@ -197,6 +234,11 @@ func (c *Client) attempt(ctx context.Context, r Request) (*Response, error) {
 		cp := *c.HTTP
 		httpClient = &cp
 	}
+	next := httpClient.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	httpClient.Transport = holdRedirects{next}
 	httpClient.CheckRedirect = refuseRedirects
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -303,11 +345,12 @@ func (c *Client) Do(ctx context.Context, r Request) (*Response, error) {
 			return resp, nil
 		}
 		if resp.Status >= 300 && resp.Status < 400 {
+			// No details: the body of a redirect can echo the request URI.
 			return nil, &Error{
-				Kind: KindValidation, Status: resp.Status, Details: errorDetails(resp), RequestID: resp.Header.Get("x-fb-trace-id"),
-				Message: fmt.Sprintf("%s %s: HTTP %d redirect to %q refused: metaads never follows redirects "+
+				Kind: KindValidation, Status: resp.Status, RequestID: resp.Header.Get("x-fb-trace-id"),
+				Message: fmt.Sprintf("%s %s: HTTP %d redirect to %s refused: metaads never follows redirects "+
 					"(they can strip HTTPS off the token and replay a write); check META_ADS_API_BASE",
-					r.Method, r.Path, resp.Status, resp.Header.Get("Location")),
+					r.Method, r.Path, resp.Status, redirectTarget(resp.Header.Get(heldLocation))),
 			}
 		}
 		me, _ := parseMetaError(resp.Body)

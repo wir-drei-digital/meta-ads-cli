@@ -61,6 +61,10 @@ type File struct{ Field, Path string }
 // fails locally instead of after minutes on the wire.
 const maxMultipart = 100 << 20
 
+// crlf removes CR and LF from a name in a part header: either would end the
+// Content-Disposition line and start a header of the sender's choosing.
+var crlf = strings.NewReplacer("\r", "", "\n", "")
+
 var quoteEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`)
 
 // EncodeMultipart writes fields and files as multipart/form-data and returns
@@ -76,7 +80,7 @@ func EncodeMultipart(fields url.Values, files []File) ([]byte, string, error) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		for _, v := range fields[k] {
-			if err := w.WriteField(k, v); err != nil {
+			if err := w.WriteField(crlf.Replace(k), v); err != nil {
 				return nil, "", err
 			}
 		}
@@ -99,7 +103,7 @@ func EncodeMultipart(fields url.Values, files []File) ([]byte, string, error) {
 		}
 		h := make(textproto.MIMEHeader)
 		h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`,
-			quoteEscaper.Replace(f.Field), quoteEscaper.Replace(filepath.Base(f.Path))))
+			quoteEscaper.Replace(crlf.Replace(f.Field)), quoteEscaper.Replace(crlf.Replace(filepath.Base(f.Path)))))
 		ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(f.Path)))
 		if ct == "" {
 			ct = "application/octet-stream"

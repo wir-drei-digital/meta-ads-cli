@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -71,5 +72,37 @@ func TestProof(t *testing.T) {
 	// printf '%s' token | openssl dgst -sha256 -hmac secret
 	if got := Proof("token", "secret"); got != "e941110e3d2bfe82621f0e3e1434730d7305d106c5f68c87165d0b27a4611a4a" {
 		t.Fatalf("proof %s", got)
+	}
+}
+
+// A CR or LF in a field name or a file name would end the Content-Disposition
+// header and start one of the sender's choosing; both are stripped.
+func TestEncodeMultipartStripsCRLF(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows file names cannot hold CR or LF")
+	}
+	p := filepath.Join(t.TempDir(), "a\r\nX-Injected: 1\r\n.png")
+	if err := os.WriteFile(p, []byte("PNG"), 0o600); err != nil {
+		t.Skipf("this file system refuses CR or LF in a name: %v", err)
+	}
+	body, ct, err := EncodeMultipart(url.Values{"note\r\nX-Text: 1": {"t"}}, []File{{Field: "file\r\nX-Field: 1", Path: p}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, params, _ := mime.ParseMediaType(ct)
+	r := multipart.NewReader(bytes.NewReader(body), params["boundary"])
+	for _, want := range []struct{ name, file string }{{"noteX-Text: 1", ""}, {"fileX-Field: 1", "aX-Injected: 1.png"}} {
+		part, err := r.NextPart()
+		if err != nil {
+			t.Fatalf("part %s: %v", want.name, err)
+		}
+		for k := range part.Header {
+			if k != "Content-Disposition" && k != "Content-Type" {
+				t.Errorf("injected header %s in part %s", k, want.name)
+			}
+		}
+		if part.FormName() != want.name || part.FileName() != want.file {
+			t.Errorf("name %q file %q, want %q %q", part.FormName(), part.FileName(), want.name, want.file)
+		}
 	}
 }
