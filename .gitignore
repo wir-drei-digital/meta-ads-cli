@@ -1,0 +1,11 @@
+bin/
+dist/
+*.test
+coverage.out
+
+# `go build ./cmd/metaads` drops the binary here; never commit it.
+/metaads
+/metaads.exe
+
+# Superpowers working artifacts: process scratch, not repo content.
+.superpowers/
