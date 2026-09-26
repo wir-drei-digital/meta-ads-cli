@@ -41,7 +41,7 @@ func TestPathAndMissingFile(t *testing.T) {
 func TestSaveLoadRoundTripAndPerms(t *testing.T) {
 	setTestDir(t)
 	in := Config{AccessToken: "tok", AppSecret: "sec", AppID: "42", AdAccountID: "7", Currency: "CHF",
-		DailyCap: &Cap{Minor: 3000, Currency: "CHF"}, LifetimeCap: &Cap{Minor: 30000, Currency: "CHF"},
+		DailyCap: &Cap{Minor: 3000, Currency: "CHF", Account: "7"}, LifetimeCap: &Cap{Minor: 30000, Currency: "CHF", Account: "7"},
 		ReadOnly: true, TokenExpiresAt: "never"}
 	mustSave(t, in)
 	out, err := Load()
@@ -52,6 +52,9 @@ func TestSaveLoadRoundTripAndPerms(t *testing.T) {
 		out.Currency != "CHF" || out.DailyCap == nil || *out.DailyCap != *in.DailyCap ||
 		out.LifetimeCap == nil || *out.LifetimeCap != *in.LifetimeCap || !out.ReadOnly || out.TokenExpiresAt != "never" {
 		t.Fatalf("round trip: %+v", out)
+	}
+	if p, _ := Path(); !fileContains(t, p, `"daily_budget_cap":{"minor":3000,"currency":"CHF","ad_account_id":"7"}`) {
+		t.Fatal("a cap must be stored with the ad account it was entered for")
 	}
 	if runtime.GOOS == "windows" {
 		return
@@ -99,7 +102,7 @@ func TestResolveFileThenEnv(t *testing.T) {
 
 func TestResolveCapsAndCurrencyOnlyFromFile(t *testing.T) {
 	setTestDir(t)
-	mustSave(t, Config{Currency: "CHF", DailyCap: &Cap{Minor: 3000, Currency: "CHF"}})
+	mustSave(t, Config{Currency: "CHF", DailyCap: &Cap{Minor: 3000, Currency: "CHF", Account: "7"}})
 	r, err := Resolve(env(map[string]string{"META_ADS_CURRENCY": "JPY", "META_ADS_DAILY_BUDGET_CAP": "999999",
 		"META_ADS_LIFETIME_BUDGET_CAP": "999999"}))
 	if err != nil || r.Currency != "CHF" || r.DailyCap == nil || r.DailyCap.Minor != 3000 || r.LifetimeCap != nil {
@@ -146,4 +149,13 @@ func TestNormalizeAppID(t *testing.T) {
 	if _, err := NormalizeAppID("12ab"); err == nil {
 		t.Fatal("a malformed app ID was accepted")
 	}
+}
+
+func fileContains(t *testing.T, path, want string) bool {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Contains(string(raw), want)
 }

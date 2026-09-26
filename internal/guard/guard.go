@@ -33,6 +33,7 @@ type Request struct {
 // Policy is the configuration the checks read.
 type Policy struct {
 	ReadOnly    bool
+	AdAccount   string // the effective ad account's digits; a cap applies to its own account only
 	Currency    string // the ad account currency
 	DailyCap    *config.Cap
 	LifetimeCap *config.Cap
@@ -305,10 +306,19 @@ func (c *checker) status(obj map[string]any, path string, sc scope) {
 	}
 }
 
+// withinCap checks amount against cp. A cap belongs to the ad account and
+// the currency it was entered for: the environment can name another
+// account, and a cap must never carry over to it.
 func (c *checker) withinCap(amount int64, cp *config.Cap, name string) error {
 	switch {
 	case cp == nil:
 		return fmt.Errorf("no %s is configured, so no such budget can be set; a person sets one with `metaads config set %s <amount>`", name, name)
+	case cp.Account == "":
+		return fmt.Errorf("the %s names no ad account; set the cap again with `metaads config set %s <amount>`", name, name)
+	case c.pol.AdAccount == "":
+		return fmt.Errorf("the %s was set for act_%s, but no ad account is configured; set the cap again for the account in use", name, cp.Account)
+	case cp.Account != c.pol.AdAccount:
+		return fmt.Errorf("the %s was set for act_%s, but the ad account is act_%s; set the cap again", name, cp.Account, c.pol.AdAccount)
 	case c.pol.Currency == "":
 		return fmt.Errorf("no currency is configured; run `metaads config set currency <code>` and set the cap again")
 	case cp.Currency != c.pol.Currency:

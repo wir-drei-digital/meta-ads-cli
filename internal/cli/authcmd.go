@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -78,10 +79,10 @@ func (a *app) authStatus() authStatus {
 		s.AdAccountID = "act_" + a.res.AdAccountID
 	}
 	if c := a.res.DailyCap; c != nil {
-		s.DailyBudgetCap = config.FormatMinor(c.Minor, c.Currency)
+		s.DailyBudgetCap = capString(c)
 	}
 	if c := a.res.LifetimeCap; c != nil {
-		s.LifetimeBudgetCap = config.FormatMinor(c.Minor, c.Currency)
+		s.LifetimeBudgetCap = capString(c)
 	}
 	var hints []string
 	if a.res.AccessToken == "" {
@@ -99,6 +100,12 @@ func (a *app) authStatus() authStatus {
 	}
 	if s.DailyBudgetCap == "" || s.LifetimeBudgetCap == "" {
 		hints = append(hints, "a budget without a matching cap is refused; a person sets the caps with `metaads config set daily-budget-cap <amount>` and `metaads config set lifetime-budget-cap <amount>`")
+	}
+	for _, c := range []*config.Cap{a.res.DailyCap, a.res.LifetimeCap} {
+		if c != nil && a.res.AdAccountID != "" && c.Account != a.res.AdAccountID {
+			hints = append(hints, fmt.Sprintf("a budget cap was set for another ad account than act_%s; budgets are refused until a person sets the caps again for it", a.res.AdAccountID))
+			break
+		}
 	}
 	if s.AppSecret == "missing" {
 		hints = append(hints, "no app secret: requests carry no appsecret_proof; store it with `metaads config set app-secret` (reads stdin)")
@@ -136,6 +143,15 @@ func (a *app) checkToken(ctx context.Context, s *authStatus) error {
 	}
 	s.Hint = strings.TrimPrefix(s.Hint+"; "+note, "; ")
 	return nil
+}
+
+// capString shows a cap with the ad account it belongs to: "30.00 CHF for act_1".
+func capString(c *config.Cap) string {
+	s := config.FormatMinor(c.Minor, c.Currency)
+	if c.Account == "" {
+		return s + " (bound to no ad account; set it again)"
+	}
+	return s + " for act_" + c.Account
 }
 
 func expiryString(unix int64) string {

@@ -31,14 +31,14 @@ func TestConfigSetAndUnset(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.AccessToken != "TOKEN-123" || c.AppSecret != "S3CR3T" || c.AppID != "42" || c.AdAccountID != "7" || c.Currency != "CHF" ||
-		c.DailyCap == nil || *c.DailyCap != (config.Cap{Minor: 3000, Currency: "CHF"}) ||
-		c.LifetimeCap == nil || *c.LifetimeCap != (config.Cap{Minor: 30050, Currency: "CHF"}) || !c.ReadOnly {
+		c.DailyCap == nil || *c.DailyCap != (config.Cap{Minor: 3000, Currency: "CHF", Account: "7"}) ||
+		c.LifetimeCap == nil || *c.LifetimeCap != (config.Cap{Minor: 30050, Currency: "CHF", Account: "7"}) || !c.ReadOnly {
 		t.Fatalf("%+v", c)
 	}
 	if strings.Contains(out.String(), "TOKEN-123") || strings.Contains(out.String(), "S3CR3T") {
 		t.Fatalf("a secret reached stdout: %q", out)
 	}
-	if !strings.Contains(out.String(), "daily_budget_cap = 30.00 CHF") {
+	if !strings.Contains(out.String(), "daily_budget_cap = 30.00 CHF for act_7") {
 		t.Fatalf("stdout %q", out)
 	}
 	for _, k := range []string{"access-token", "app-secret", "app-id", "ad-account-id", "currency", "daily-budget-cap", "lifetime-budget-cap", "read-only"} {
@@ -65,6 +65,7 @@ func TestConfigSetCapNeedsCurrency(t *testing.T) {
 func TestConfigSetCapComma(t *testing.T) {
 	isolate(t)
 	a, _, errb := testApp(t, nil, config.Resolved{})
+	runOK(t, a, "", "config", "set", "ad-account-id", "act_7")
 	runOK(t, a, "", "config", "set", "currency", "CHF")
 	if code := a.run([]string{"config", "set", "daily-budget-cap", "29,50"}); code != 2 || !strings.Contains(errJSON(t, errb)["error"].(string), "dot") {
 		t.Fatalf("exit %d %s", code, errb)
@@ -77,9 +78,10 @@ func TestConfigSetCapComma(t *testing.T) {
 func TestConfigSetCapJPY(t *testing.T) {
 	isolate(t)
 	a, _, _ := testApp(t, nil, config.Resolved{})
+	runOK(t, a, "", "config", "set", "ad-account-id", "7")
 	runOK(t, a, "", "config", "set", "currency", "JPY")
 	runOK(t, a, "", "config", "set", "daily-budget-cap", "3000")
-	if c, _ := config.Load(); c.DailyCap == nil || *c.DailyCap != (config.Cap{Minor: 3000, Currency: "JPY"}) {
+	if c, _ := config.Load(); c.DailyCap == nil || *c.DailyCap != (config.Cap{Minor: 3000, Currency: "JPY", Account: "7"}) {
 		t.Fatalf("%+v", c.DailyCap)
 	}
 }
@@ -87,6 +89,7 @@ func TestConfigSetCapJPY(t *testing.T) {
 func TestConfigCurrencyChangeWarnsAboutCaps(t *testing.T) {
 	isolate(t)
 	a, _, errb := testApp(t, nil, config.Resolved{})
+	runOK(t, a, "", "config", "set", "ad-account-id", "act_7")
 	runOK(t, a, "", "config", "set", "currency", "CHF")
 	runOK(t, a, "", "config", "set", "daily-budget-cap", "30")
 	runOK(t, a, "", "config", "set", "currency", "EUR")
@@ -142,5 +145,40 @@ func TestConfigSecretFromArgsIsNotEchoed(t *testing.T) {
 			!strings.Contains(errJSON(t, errb)["error"].(string), "stdin") {
 			t.Fatalf("%s: exit %d %s", k, code, errb)
 		}
+	}
+}
+
+// A cap is bound to an ad account from the config file. The environment's
+// account is what an agent can change, so it cannot be what a cap is set for.
+func TestConfigSetCapNeedsAdAccountInFile(t *testing.T) {
+	isolate(t)
+	res := config.Resolved{AdAccountID: "7", FromEnv: map[string]bool{"META_ADS_AD_ACCOUNT_ID": true}}
+	a, _, errb := testApp(t, nil, res)
+	runOK(t, a, "", "config", "set", "currency", "CHF")
+	for _, k := range []string{"daily-budget-cap", "lifetime-budget-cap"} {
+		errb.Reset()
+		if code := a.run([]string{"config", "set", k, "30"}); code != 2 ||
+			!strings.Contains(errJSON(t, errb)["error"].(string), "set the ad account first with `metaads config set ad-account-id <id>`") {
+			t.Fatalf("%s: exit %d %s", k, code, errb)
+		}
+	}
+	if c, _ := config.Load(); c.DailyCap != nil || c.LifetimeCap != nil {
+		t.Fatalf("a cap without an ad account was saved: %+v", c)
+	}
+}
+
+func TestConfigAdAccountChangeWarnsAboutCaps(t *testing.T) {
+	isolate(t)
+	a, _, errb := testApp(t, nil, config.Resolved{})
+	runOK(t, a, "", "config", "set", "ad-account-id", "act_7")
+	runOK(t, a, "", "config", "set", "currency", "CHF")
+	runOK(t, a, "", "config", "set", "lifetime-budget-cap", "300")
+	runOK(t, a, "", "config", "set", "ad-account-id", "7")
+	if errb.Len() != 0 {
+		t.Fatalf("the same account needs no note: %q", errb)
+	}
+	runOK(t, a, "", "config", "set", "ad-account-id", "act_8")
+	if !strings.Contains(errb.String(), "budgets are refused until you set the caps again for act_8") {
+		t.Fatalf("stderr %q", errb)
 	}
 }

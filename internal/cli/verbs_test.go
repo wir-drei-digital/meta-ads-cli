@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/wir-drei-digital/meta-ads-cli/internal/config"
 )
 
 func TestGetBuildsQuery(t *testing.T) {
@@ -311,5 +314,40 @@ func TestWriteEdgeSpellingRefused(t *testing.T) {
 	}
 	if len(g.all()) != 0 {
 		t.Fatalf("%d requests were sent", len(g.all()))
+	}
+}
+
+// META_ADS_AD_ACCOUNT_ID decides what act means and is reachable by an
+// agent; the caps a person entered for one account never apply to another.
+func TestBudgetRefusedForAnotherAccountFromEnv(t *testing.T) {
+	isolate(t)
+	if err := config.Save(config.Config{AccessToken: "tok", AdAccountID: "1", Currency: "CHF",
+		DailyCap: &config.Cap{Minor: 3000, Currency: "CHF", Account: "1"}, LifetimeCap: &config.Cap{Minor: 30000, Currency: "CHF", Account: "1"}}); err != nil {
+		t.Fatal(err)
+	}
+	g := newFakeGraph(t, nil)
+	withAccount := func(account string) (*app, *bytes.Buffer) {
+		env := map[string]string{"META_ADS_API_BASE": g.URL, "META_ADS_ALLOW_CUSTOM_BASE": "1", "META_ADS_AD_ACCOUNT_ID": account}
+		var out, errb bytes.Buffer
+		a := &app{stdout: &out, stderr: &errb, stdin: strings.NewReader("")}
+		a.configure(func(k string) string { return env[k] }, func(time.Duration) {})
+		return a, &errb
+	}
+	for _, args := range [][]string{
+		{"post", "act/adsets", "--data", `{"status":"PAUSED","daily_budget":100}`},
+		{"post", "act/campaigns", "--validate-only", "--data", `{"status":"PAUSED","lifetime_budget":100}`},
+		{"post", "123", "--force", "--data", `{"daily_budget":100}`},
+	} {
+		a, errb := withAccount("act_2")
+		if code := a.run(args); code != 2 || !strings.Contains(errJSON(t, errb)["error"].(string), "was set for act_1, but the ad account is act_2; set the cap again") {
+			t.Fatalf("%v: exit %d %s", args, code, errb)
+		}
+	}
+	if len(g.all()) != 0 {
+		t.Fatalf("%d requests were sent", len(g.all()))
+	}
+	a, errb := withAccount("act_1")
+	if code := a.run([]string{"post", "act/adsets", "--data", `{"status":"PAUSED","daily_budget":100}`}); code != 0 || len(g.all()) != 1 {
+		t.Fatalf("the cap's own account: exit %d %s", code, errb)
 	}
 }

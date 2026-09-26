@@ -11,8 +11,8 @@ import (
 )
 
 func pol() Policy {
-	return Policy{Currency: "CHF", DailyCap: &config.Cap{Minor: 3000, Currency: "CHF"},
-		LifetimeCap: &config.Cap{Minor: 30000, Currency: "CHF"}}
+	return Policy{AdAccount: "1", Currency: "CHF", DailyCap: &config.Cap{Minor: 3000, Currency: "CHF", Account: "1"},
+		LifetimeCap: &config.Cap{Minor: 30000, Currency: "CHF", Account: "1"}}
 }
 
 func rt(t *testing.T, path, verb string) route.Route {
@@ -85,7 +85,7 @@ func TestBudgetCaps(t *testing.T) {
 	check(t, "lifetime above cap", post(t, "act/campaigns", `{"status":"PAUSED","lifetime_budget":30001}`), pol(), want{err: "lifetime-budget-cap"})
 	check(t, "no cap", post(t, "act/adsets", `{"status":"PAUSED","daily_budget":100}`), noCaps(pol()), want{err: "no daily-budget-cap is configured"})
 	eur := pol()
-	eur.DailyCap = &config.Cap{Minor: 3000, Currency: "EUR"}
+	eur.DailyCap = &config.Cap{Minor: 3000, Currency: "EUR", Account: "1"}
 	check(t, "cap in another currency", post(t, "act/adsets", `{"status":"PAUSED","daily_budget":100}`), eur, want{err: "set the cap again"})
 	nocur := pol()
 	nocur.Currency = ""
@@ -348,4 +348,29 @@ func TestAsyncAdRequestSetsRefused(t *testing.T) {
 	if Rules().Refused["edge asyncadrequestsets"] == "" {
 		t.Fatal("the catalog must publish the asyncadrequestsets refusal")
 	}
+}
+
+// Each cap belongs to the ad account it was entered for. The environment can
+// point the CLI at another account; a cap never carries over to it.
+func TestCapsAreBoundToTheirAccount(t *testing.T) {
+	body := `{"status":"PAUSED","daily_budget":100}`
+	other := pol()
+	other.AdAccount = "2"
+	check(t, "another account", post(t, "act/adsets", body), other,
+		want{err: "daily_budget 100: the daily-budget-cap was set for act_1, but the ad account is act_2; set the cap again"})
+	check(t, "another account, forced update", force(post(t, "123", body)), other, want{err: "but the ad account is act_2"})
+	check(t, "another account, validate-only", validateOnly(post(t, "act/adsets", body)), other, want{err: "but the ad account is act_2"})
+	check(t, "lifetime, another account", post(t, "act/adsets", `{"status":"PAUSED","lifetime_budget":100}`), other,
+		want{err: "the lifetime-budget-cap was set for act_1, but the ad account is act_2"})
+	check(t, "nested, another account", post(t, "act/ads", `{"status":"PAUSED","adset_spec":{"status":"PAUSED","daily_budget":100}}`), other,
+		want{err: "adset_spec.daily_budget 100: the daily-budget-cap was set for act_1"})
+	check(t, "delete parameter, another account", force(Request{Verb: "DELETE", Route: rt(t, "123", "DELETE"),
+		Params: url.Values{"daily_budget": {"100"}}}), other, want{err: "but the ad account is act_2"})
+	unbound := pol()
+	unbound.DailyCap = &config.Cap{Minor: 3000, Currency: "CHF"}
+	check(t, "cap without an account", post(t, "act/adsets", body), unbound, want{err: "the daily-budget-cap names no ad account; set the cap again"})
+	none := pol()
+	none.AdAccount = ""
+	check(t, "no ad account", force(post(t, "123", body)), none, want{err: "the daily-budget-cap was set for act_1, but no ad account is configured"})
+	check(t, "same account", post(t, "act/adsets", body), pol(), want{class: Write})
 }

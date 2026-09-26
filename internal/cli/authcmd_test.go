@@ -25,7 +25,7 @@ func TestAuthStatusOffline(t *testing.T) {
 	}
 	s := status(t, out.String())
 	if s["mode"] != "token" || s["source"] != "env" || s["ad_account_id"] != "act_1" || s["currency"] != "CHF" ||
-		s["daily_budget_cap"] != "30.00 CHF" || s["lifetime_budget_cap"] != "300.00 CHF" || s["app_secret"] != "missing" ||
+		s["daily_budget_cap"] != "30.00 CHF for act_1" || s["lifetime_budget_cap"] != "300.00 CHF for act_1" || s["app_secret"] != "missing" ||
 		strings.Contains(out.String(), `"tok"`) {
 		t.Fatalf("%s", out)
 	}
@@ -133,5 +133,18 @@ func TestAuthRefreshRefusals(t *testing.T) {
 		if code := a.run([]string{"auth", "refresh"}); code != 2 || !strings.Contains(errJSON(t, errb)["error"].(string), c.want) {
 			t.Fatalf("%+v: exit %d %s", c.res, code, errb)
 		}
+	}
+}
+
+func TestAuthStatusCapForAnotherAccount(t *testing.T) {
+	res := defaultRes()
+	res.AdAccountID = "2"
+	a, out, _ := testApp(t, nil, res)
+	if code := a.run([]string{"auth", "status"}); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	s := status(t, out.String())
+	if s["daily_budget_cap"] != "30.00 CHF for act_1" || !strings.Contains(s["hint"].(string), "set for another ad account than act_2") {
+		t.Fatalf("%s", out)
 	}
 }

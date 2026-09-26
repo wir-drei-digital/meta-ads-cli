@@ -76,7 +76,15 @@ func TestSmoke(t *testing.T) {
 		if _, errOut, code := run(t, bin, env, "", "post", "act/campaigns", "--data", budget("100")); code != 2 || !strings.Contains(errOut, "no daily-budget-cap") {
 			t.Fatalf("no cap: exit %d %q", code, errOut)
 		}
-		for _, args := range [][]string{{"config", "set", "currency", "CHF"}, {"config", "set", "daily-budget-cap", "30"}} {
+		// The cap is bound to the ad account in the config file, not to the
+		// one META_ADS_AD_ACCOUNT_ID names.
+		if _, errOut, code := run(t, bin, env, "", "config", "set", "currency", "CHF"); code != 0 {
+			t.Fatalf("currency: exit %d %q", code, errOut)
+		}
+		if _, errOut, code := run(t, bin, env, "", "config", "set", "daily-budget-cap", "30"); code != 2 || !strings.Contains(errOut, "set the ad account first") {
+			t.Fatalf("cap without an ad account in the file: exit %d %q", code, errOut)
+		}
+		for _, args := range [][]string{{"config", "set", "ad-account-id", "act_1"}, {"config", "set", "daily-budget-cap", "30"}} {
 			if _, errOut, code := run(t, bin, env, "", args...); code != 0 {
 				t.Fatalf("%v: exit %d %q", args, code, errOut)
 			}
@@ -86,6 +94,12 @@ func TestSmoke(t *testing.T) {
 		}
 		if _, errOut, code := run(t, bin, env, "", "post", "act/campaigns", "--data", budget("3000")); code != 0 {
 			t.Fatalf("at cap: exit %d %q", code, errOut)
+		}
+		writes := g.writes.Load()
+		other := append(append([]string(nil), env...), "META_ADS_AD_ACCOUNT_ID=act_2")
+		if _, errOut, code := run(t, bin, other, "", "post", "act/campaigns", "--data", budget("100")); code != 2 ||
+			!strings.Contains(errOut, "was set for act_1, but the ad account is act_2") || g.writes.Load() != writes {
+			t.Fatalf("another account from the environment: exit %d %q", code, errOut)
 		}
 	})
 	t.Run("auth status", func(t *testing.T) {

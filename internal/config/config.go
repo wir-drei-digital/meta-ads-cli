@@ -24,12 +24,15 @@ const DefaultAPIVersion = "v26.0"
 // userConfigDir is swapped in tests.
 var userConfigDir = os.UserConfigDir
 
-// Cap is a budget cap in the minor unit of the currency it was entered for.
-// A cap entered for another currency than the account's refuses every budget
-// it would check, until a person sets it again.
+// Cap is a budget cap in the minor unit of the currency it was entered for,
+// bound to the ad account it was entered for. A cap whose account or
+// currency differs from the effective one refuses every budget it would
+// check, until a person sets it again: META_ADS_AD_ACCOUNT_ID can point the
+// CLI at another account, but never carry a cap across to it.
 type Cap struct {
 	Minor    int64  `json:"minor"`
 	Currency string `json:"currency"`
+	Account  string `json:"ad_account_id"` // digits, without act_
 }
 
 // Config is the on-disk configuration.

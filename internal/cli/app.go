@@ -93,7 +93,8 @@ func (a *app) requireConfig(cmd *cobra.Command) error {
 
 // policy is what the guard reads from the configuration.
 func (a *app) policy() guard.Policy {
-	return guard.Policy{ReadOnly: a.res.ReadOnly, Currency: a.res.Currency, DailyCap: a.res.DailyCap, LifetimeCap: a.res.LifetimeCap}
+	return guard.Policy{ReadOnly: a.res.ReadOnly, AdAccount: a.res.AdAccountID, Currency: a.res.Currency,
+		DailyCap: a.res.DailyCap, LifetimeCap: a.res.LifetimeCap}
 }
 
 // contextSleeper returns a sleep that gives up as soon as ctx is done.

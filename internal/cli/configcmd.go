@@ -23,9 +23,18 @@ func (a *app) configCommand() *cobra.Command {
 		}, "access token saved; check it with `metaads auth status --check`"),
 		a.secretSetter("app-secret", "app secret", "META_ADS_APP_SECRET", func(c *config.Config, v string) { c.AppSecret = v },
 			"app secret saved; requests now carry appsecret_proof"),
-		a.idSetter("app-id", "Meta app ID", "META_ADS_APP_ID", config.NormalizeAppID, func(c *config.Config, v string) { c.AppID = v }, ""),
+		a.idSetter("app-id", "Meta app ID", "META_ADS_APP_ID", config.NormalizeAppID, func(c *config.Config, v string) string {
+			c.AppID = v
+			return ""
+		}, ""),
 		a.idSetter("ad-account-id", "ad account (e.g. act_1234567890)", "META_ADS_AD_ACCOUNT_ID", config.NormalizeAccountID,
-			func(c *config.Config, v string) { c.AdAccountID = v }, "act_"),
+			func(c *config.Config, v string) string {
+				c.AdAccountID = v
+				if (c.DailyCap != nil && c.DailyCap.Account != v) || (c.LifetimeCap != nil && c.LifetimeCap.Account != v) {
+					return "note: a budget cap was set for another ad account; budgets are refused until you set the caps again for act_" + v
+				}
+				return ""
+			}, "act_"),
 		&cobra.Command{
 			Use:   "currency <code>",
 			Short: "Set the ad account's currency (ISO code, e.g. CHF); budget caps are entered in it",
@@ -167,7 +176,8 @@ func (a *app) secretSetter(use, what, envName string, assign func(*config.Config
 	}
 }
 
-func (a *app) idSetter(use, what, envName string, normalize func(string) (string, error), assign func(*config.Config, string), prefix string) *cobra.Command {
+// idSetter stores an identifier; assign returns a note for stderr, or "".
+func (a *app) idSetter(use, what, envName string, normalize func(string) (string, error), assign func(*config.Config, string) string, prefix string) *cobra.Command {
 	return &cobra.Command{
 		Use:   use + " <id>",
 		Short: "Save the " + what,
@@ -177,10 +187,14 @@ func (a *app) idSetter(use, what, envName string, normalize func(string) (string
 			if err != nil {
 				return api.Usagef("%s: %v", use, err)
 			}
-			if err := a.updateConfig(func(c *config.Config) { assign(c, id) }); err != nil {
+			note := ""
+			if err := a.updateConfig(func(c *config.Config) { note = assign(c, id) }); err != nil {
 				return err
 			}
 			a.warnEnv(envName)
+			if note != "" {
+				fmt.Fprintln(a.stderr, note)
+			}
 			fmt.Fprintf(a.stdout, "%s = %s%s\n", strings.ReplaceAll(use, "-", "_"), prefix, id)
 			return nil
 		},
@@ -195,6 +209,8 @@ func (a *app) capSetter(use, kind string, assign func(*config.Config, *config.Ca
 			"configured currency (for example 30 or 29.50, a dot as the decimal separator). --force does not\n" +
 			"override it, and no environment variable or flag can change it. Without it no " + kind + " budget\n" +
 			"can be set at all.\n\n" +
+			"The cap belongs to the ad account and the currency in the config file when it is set: for any\n" +
+			"other account, META_ADS_AD_ACCOUNT_ID included, budgets are refused until it is set again.\n\n" +
 			"Meta may spend up to 75% more than a daily budget on a single day, and at most 7 times the daily\n" +
 			"budget in a week. A lifetime budget is never exceeded.",
 		Args: cobra.ExactArgs(1),
@@ -206,17 +222,23 @@ func (a *app) capSetter(use, kind string, assign func(*config.Config, *config.Ca
 			if c.Currency == "" {
 				return api.Usagef("%s: set the currency first with `metaads config set currency <code>` (or run `metaads init`)", use)
 			}
+			// The file's account, never the environment's: an agent can set
+			// META_ADS_AD_ACCOUNT_ID, and a cap is a person's decision for one
+			// account.
+			if c.AdAccountID == "" {
+				return api.Usagef("%s: set the ad account first with `metaads config set ad-account-id <id>`; "+
+					"a cap belongs to the ad account in the config file, not to META_ADS_AD_ACCOUNT_ID", use)
+			}
 			minor, err := config.ParseMajor(args[0], c.Currency)
 			if err != nil {
 				return api.Usagef("%s: %v", use, err)
 			}
-			cp := &config.Cap{Minor: minor, Currency: c.Currency}
+			cp := &config.Cap{Minor: minor, Currency: c.Currency, Account: c.AdAccountID}
 			assign(&c, cp)
 			if err := config.Save(c); err != nil {
 				return api.Usagef("%v", err)
 			}
-			fmt.Fprintf(a.stdout, "%s = %s (%d in Meta's minor unit)\n", strings.ReplaceAll(use, "-", "_"),
-				config.FormatMinor(minor, c.Currency), minor)
+			fmt.Fprintf(a.stdout, "%s = %s (%d in Meta's minor unit)\n", strings.ReplaceAll(use, "-", "_"), capString(cp), minor)
 			return nil
 		},
 	}

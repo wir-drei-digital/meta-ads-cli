@@ -65,7 +65,7 @@ func (g *fakeGraph) all() []seen {
 
 func defaultRes() config.Resolved {
 	return config.Resolved{AccessToken: "tok", TokenFrom: "env", AdAccountID: "1", Currency: "CHF",
-		DailyCap: &config.Cap{Minor: 3000, Currency: "CHF"}, LifetimeCap: &config.Cap{Minor: 30000, Currency: "CHF"}}
+		DailyCap: &config.Cap{Minor: 3000, Currency: "CHF", Account: "1"}, LifetimeCap: &config.Cap{Minor: 30000, Currency: "CHF", Account: "1"}}
 }
 
 // testApp wires an app to g (or, with g nil, to the real host for tests that

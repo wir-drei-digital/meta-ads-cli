@@ -72,8 +72,8 @@ func TestInitSavesEverything(t *testing.T) {
 	}
 	c, _ := config.Load()
 	if c.AccessToken != "SECRET-TOKEN-1" || c.AppID != "42" || c.AppSecret != "APP-SECRET-1" || c.AdAccountID != "7" ||
-		c.Currency != "CHF" || c.DailyCap == nil || *c.DailyCap != (config.Cap{Minor: 3000, Currency: "CHF"}) ||
-		c.LifetimeCap == nil || *c.LifetimeCap != (config.Cap{Minor: 30000, Currency: "CHF"}) || c.TokenExpiresAt != "never" {
+		c.Currency != "CHF" || c.DailyCap == nil || *c.DailyCap != (config.Cap{Minor: 3000, Currency: "CHF", Account: "7"}) ||
+		c.LifetimeCap == nil || *c.LifetimeCap != (config.Cap{Minor: 30000, Currency: "CHF", Account: "7"}) || c.TokenExpiresAt != "never" {
 		t.Fatalf("%+v", c)
 	}
 	o := out.String()
@@ -130,7 +130,7 @@ func TestInitAsksWhichAccount(t *testing.T) {
 	if code := a.run([]string{"init"}); code != 0 {
 		t.Fatalf("exit %d %s", code, errb)
 	}
-	if c, _ := config.Load(); c.AdAccountID != "8" {
+	if c, _ := config.Load(); c.AdAccountID != "8" || c.DailyCap == nil || c.DailyCap.Account != "8" || c.LifetimeCap == nil || c.LifetimeCap.Account != "8" {
 		t.Fatalf("%+v", c)
 	}
 }

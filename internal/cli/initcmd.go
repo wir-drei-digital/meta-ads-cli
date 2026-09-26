@@ -189,8 +189,8 @@ func (a *app) runInit(ctx context.Context, p prompter) error {
 	}
 	if err := a.updateConfig(func(c *config.Config) {
 		c.AccessToken, c.AppID, c.AppSecret, c.AdAccountID, c.Currency = token, appID, secret, id, currency
-		c.DailyCap = &config.Cap{Minor: daily, Currency: currency}
-		c.LifetimeCap = &config.Cap{Minor: lifetime, Currency: currency}
+		c.DailyCap = &config.Cap{Minor: daily, Currency: currency, Account: id}
+		c.LifetimeCap = &config.Cap{Minor: lifetime, Currency: currency, Account: id}
 		c.TokenExpiresAt = expiry
 	}); err != nil {
 		return err
