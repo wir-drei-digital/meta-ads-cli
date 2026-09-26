@@ -60,9 +60,6 @@ func Check(req Request, pol Policy) (Decision, error) {
 	case "DELETE":
 		fields := make(map[string]any, len(req.Params))
 		for _, k := range sortedParams(req.Params) {
-			if reason, ok := refusedFields[k]; ok {
-				return Decision{}, fmt.Errorf("%s is refused: %s", k, reason)
-			}
 			if len(req.Params[k]) > 1 {
 				return Decision{}, fmt.Errorf("parameter %s is given more than once; %s", k, repeatedReason)
 			}
@@ -71,8 +68,14 @@ func Check(req Request, pol Policy) (Decision, error) {
 		// Delete first: a spend finding below shares its rank and must not
 		// rename the class.
 		c.add(Delete, "DELETE removes what the path names")
-		// The field checks apply to delete parameters as to a POST update.
-		if err := c.object(fields, "", scopeUpdate); err != nil {
+		// The field checks, refusals included, apply to delete parameters as
+		// to a POST on the same path: the account node keeps its own scope,
+		// so its spend_cap stays refused on every verb.
+		sc := scopeUpdate
+		if req.Route.Edge == "" && req.Route.IsAccount() {
+			sc = scopeAccount
+		}
+		if err := c.object(fields, "", sc); err != nil {
 			return Decision{}, err
 		}
 	case "POST":

@@ -280,3 +280,18 @@ func TestPostParams(t *testing.T) {
 	r.Params = url.Values{}
 	check(t, "post with empty parameters", r, pol(), want{class: Write})
 }
+
+func TestDeleteAccountSpendCap(t *testing.T) {
+	del := func(path string) Request {
+		return force(Request{Verb: "DELETE", Route: rt(t, path, "DELETE"), Params: url.Values{"spend_cap": {"1000"}}})
+	}
+	check(t, "spend_cap on DELETE act", del("act"), pol(), want{err: "spend_cap on the ad account is refused"})
+	check(t, "spend_cap_action on DELETE act", force(Request{Verb: "DELETE", Route: rt(t, "act", "DELETE"),
+		Params: url.Values{"spend_cap_action": {"reset"}}}), pol(), want{err: "spend_cap_action is refused"})
+	check(t, "spend_cap on DELETE 123", del("123"), pol(), want{class: Delete})
+	d, err := Check(del("123"), pol())
+	if err != nil || len(d.Findings) != 2 || !strings.Contains(d.Findings[1], "spend_cap changes or removes a spending limit") {
+		t.Fatalf("a campaign spend_cap on a delete is a spend finding: %+v %v", d, err)
+	}
+	check(t, "spend_cap on DELETE act/adimages", del("act/adimages"), pol(), want{class: Delete})
+}
