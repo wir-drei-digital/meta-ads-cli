@@ -26,6 +26,7 @@ func (a *app) newRoot() *cobra.Command {
 	pf := root.PersistentFlags()
 	pf.Bool("verbose", false, "log requests to stderr (credentials and query strings are never logged)")
 	pf.Duration("timeout", 60*time.Second, "per-attempt HTTP timeout")
-	root.AddCommand(a.getCommand(), a.postCommand(), a.deleteCommand(), a.versionCommand(), a.commandsCommand())
+	root.AddCommand(a.getCommand(), a.postCommand(), a.deleteCommand(), a.versionCommand(), a.commandsCommand(),
+		a.configCommand(), a.authCommand(), a.initCommand())
 	return root
 }

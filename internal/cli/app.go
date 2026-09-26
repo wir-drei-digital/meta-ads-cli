@@ -32,6 +32,10 @@ type app struct {
 	configErr      error
 	stdout, stderr io.Writer
 	stdin          io.Reader
+	// prompt and isTerminal are seams for `init`, the one interactive
+	// command; nil in production, where init uses the real terminal.
+	prompt     prompter
+	isTerminal func() bool
 }
 
 // Execute is the process entry point: it resolves the configuration, runs
