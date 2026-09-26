@@ -28,8 +28,11 @@ the API.
 
 metaads refuses to change the ad account's spending limit, and its budget caps and `--force` gate
 are only as strong as the shell they run in: someone with shell access can pass `--force` or edit
-the config file. The ceiling that holds regardless is the account spending limit, set by a person in
-the Business Portfolio's billing settings. Set one before any agent works on campaigns.
+the config file. Each budget cap belongs to the ad account and the currency it was entered for, so
+pointing metaads at another account, through `META_ADS_AD_ACCOUNT_ID` for example, does not carry
+the caps over: budgets there are refused until a person sets caps for that account. The ceiling
+that holds regardless is the account spending limit, set by a person in the Business Portfolio's
+billing settings. Set one before any agent works on campaigns.
 
 ## Where the credentials live
 

@@ -91,7 +91,7 @@ and error messages print paths without query strings.
 secret:
 
 ```json
-{"mode":"token","source":"config","app_id":"1234567890","app_secret":"set","ad_account_id":"act_1234567890","currency":"CHF","daily_budget_cap":"30.00 CHF","lifetime_budget_cap":"300.00 CHF","read_only":false,"token_expires_at":"2026-11-24T08:00:00Z"}
+{"mode":"token","source":"config","app_id":"1234567890","app_secret":"set","ad_account_id":"act_1234567890","currency":"CHF","daily_budget_cap":"30.00 CHF for act_1234567890","lifetime_budget_cap":"300.00 CHF for act_1234567890","read_only":false,"token_expires_at":"2026-11-24T08:00:00Z"}
 ```
 
 | Key | Meaning |
@@ -102,7 +102,7 @@ secret:
 | `app_secret` | `set` or `missing` |
 | `ad_account_id` | the configured ad account, as `act_<id>` |
 | `currency` | the account currency the caps are entered in |
-| `daily_budget_cap`, `lifetime_budget_cap` | the caps with their currency |
+| `daily_budget_cap`, `lifetime_budget_cap` | the caps with their currency and the ad account they belong to |
 | `read_only` | whether read-only mode is on |
 | `token_expires_at` | the expiry as last recorded by `init`, `auth status --check` or `auth refresh`; `never` for a token that does not expire |
 | `is_valid`, `scopes`, `ad_accounts` | with `--check` only |
@@ -111,8 +111,9 @@ secret:
 
 `metaads auth status --check` asks Meta. With the app ID and secret it calls `debug_token` with the
 app token and adds `is_valid`, `scopes` and `ad_accounts` (the ad accounts the token reaches with
-`ads_management` or `ads_read`), and updates `token_expires_at`, in the config file too when the
-token comes from there. Without them it calls `me` and reports validity only.
+`ads_management` or `ads_read`). For a valid token it updates `token_expires_at`, in the config file
+too when the token comes from there; for an invalid one the recorded expiry stays as it was. Without
+them it calls `me` and reports validity only.
 
 `metaads auth refresh` renews a 60-day token. It needs the app ID, the app secret and a token stored
 in the config file, calls `GET /oauth/access_token` with `grant_type=fb_exchange_token` and
@@ -143,17 +144,21 @@ directory; `metaads config path` prints the exact location. `metaads config set 
 
 A cap is entered in major units with a dot as the decimal separator, with at most as many decimals
 as the currency has (`29.50` for CHF, `3000` for JPY), and stored in Meta's minor unit together with
-the currency it was entered for. A comma (`29,50`) is refused. Setting a cap needs a configured
-currency; when the currency changes later, budgets are refused until the caps are set again in the
-new currency. Passing an environment variable name as the key (`META_ADS_READ_ONLY`) gets an error
-naming the key it meant. Unsetting a key that is not set is a no-op success.
+the ad account and the currency it was entered for. A comma (`29,50`) is refused. Setting a cap needs
+a configured currency and an ad account in the config file; `META_ADS_AD_ACCOUNT_ID` does not count,
+because an agent can set it. Each cap belongs to that one ad account and that one currency: when the
+currency or the ad account changes later, or `META_ADS_AD_ACCOUNT_ID` names another account, budgets
+are refused until the caps are set again. `config set currency` and `config set ad-account-id` say
+so when they leave a cap behind. Passing an environment variable name as the key
+(`META_ADS_READ_ONLY`) gets an error naming the key it meant. Unsetting a key that is not set is a
+no-op success.
 
 Environment variables, which win over the file: `META_ADS_ACCESS_TOKEN`, `META_ADS_APP_SECRET`,
 `META_ADS_APP_ID`, `META_ADS_AD_ACCOUNT_ID`, `META_ADS_READ_ONLY`, `META_ADS_API_BASE`,
 `META_ADS_ALLOW_CUSTOM_BASE`. Two exceptions:
 
 - The caps and the currency have no environment variable and no flag. They live in the config file
-  only.
+  only, and each cap applies to the ad account it was set for, never to one the environment names.
 - `META_ADS_READ_ONLY` (`1` or `true`) only switches read-only mode on. It cannot switch off a
   read-only mode stored in the config file; to turn that off, run `metaads config unset read-only`.
 
@@ -262,9 +267,11 @@ class and ignores `--force`.
 
 `post` and `delete` take `act`, `act_<id>` or an object ID as the node, followed by at most one
 edge; an `act_<id>` other than the configured account is refused, so writes never reach an account
-whose currency the caps know nothing about. `get` accepts any node. A `POST /<id>` cannot tell a
-campaign from an ad set, an ad or a creative, so the field checks key on field names, whatever the
-object.
+whose currency the caps know nothing about. Their edge must be spelt as Meta spells it, lowercase
+letters, digits and underscores (`^[a-z0-9_]+$`): the guard matches an edge exactly, so
+`Budget_Schedules` is refused rather than read as some unknown edge. `get` accepts any node and any
+spelling. A `POST /<id>` cannot tell a campaign from an ad set, an ad or a creative, so the field
+checks key on field names, whatever the object.
 
 ### Field checks
 
@@ -280,10 +287,11 @@ JSON; a string that does not parse refuses the request.
    default. That includes `"ARCHIVED"` and `"DELETED"` on a create.
 3. `daily_budget` is compared with `daily-budget-cap`, `lifetime_budget` with
    `lifetime-budget-cap`. Without the matching cap, without a configured currency, with a cap
-   entered in another currency, or above the cap, the request is refused. `--force` and
-   `--validate-only` do not change that. The value must be a JSON integer or a string of ASCII
-   digits, without sign, spaces, leading zeros, decimals or exponent (`3000`, `"3000"`); anything
-   else refuses the request with a message to write a whole number in the minor unit.
+   set for another ad account than the one in use or in another currency, or above the cap, the
+   request is refused. `--force` and `--validate-only` do not change that. The value must be a JSON
+   integer or a string of ASCII digits, without sign, spaces, leading zeros, decimals or exponent
+   (`3000`, `"3000"`); anything else refuses the request with a message to write a whole number in
+   the minor unit.
 4. A budget within its cap on a create (the create edges and the nested specs) is `write`, because
    the object is paused or gated by rule 1 or 2. A budget anywhere else, such as `POST /<id>` or an
    `adset_budgets` entry, is `spend`, whether it raises or lowers the amount: the CLI does not look
@@ -314,18 +322,24 @@ How a request is read:
 ### Refused
 
 Refused before any network I/O, whatever the flags, with kind `usage` and the reason. A refused
-field is refused in a `post` body, in its nested specs and in `delete` parameters; a refused edge is
-refused for `post`.
+field is refused in a `post` body, in its nested specs, in `delete` parameters and as a `--file`
+name; a refused edge is refused for `post`.
 
 | Refused | Reason |
 | --- | --- |
-| `spend_cap` on the ad account, and `spend_cap_action` | the account spending limit belongs to a person; `reset` frees headroom by zeroing the amount spent |
-| the `budget_schedules` edge and the field `budget_schedule_specs` | high-demand periods raise a daily budget up to 8 times, outside the cap |
-| the `adrules_library` edge | automated rules change budgets and status later, outside any check |
+| `spend_cap` on the ad account | the account spending limit belongs to a person; change it in the Business Portfolio's billing settings |
+| `spend_cap_action` | the account spending limit belongs to a person; `reset` frees headroom by zeroing the amount spent |
+| the `budget_schedules` edge, and the fields `budget_schedule_specs`, `budget_value` and `budget_value_type` | high-demand periods raise a daily budget up to 8 times, outside the cap |
+| the `adrules_library` edge, and the fields `execution_spec`, `evaluation_spec` and `schedule_spec` | automated rules change budgets and status later, outside any check |
 | `buying_type` other than `"AUCTION"`, and the `reachfrequencypredictions` edge | reserved buying commits spend the cap cannot check |
 | `delete_strategy` | bulk deletion of every campaign, ad set or ad matching a strategy |
-| `batch` and the `async_batch_requests` edge | batch requests; sequential calls do the job at the intended scale |
+| `batch`, and the `async_batch_requests` and `asyncadrequestsets` edges | bulk and batch requests; sequential calls do the job at the intended scale |
+| a `post` or `delete` edge outside `^[a-z0-9_]+$` (`Budget_Schedules`) | Meta's edges are lowercase snake_case, and the guard matches an edge exactly |
 | a name outside `^[a-z0-9_]+$`, and a `--param` key given twice | see *How a request is read* |
+
+`POST /<id>` cannot tell a campaign from an automated rule or a budget schedule, so the fields that
+edit an existing rule or schedule are refused like the edges that create them.
+`asyncadrequestsets` creates ads in bulk from `ad_specs` the guard does not read.
 
 ### Parameters the CLI owns
 
@@ -355,6 +369,9 @@ endpoint that ignores `execution_options` would otherwise apply the change.
   in the config file only: no environment variable, no flag. They apply to every budget in every
   request, with or without `--force` and `--validate-only`. Without a cap, no budget of that kind
   can be set at all.
+- Each cap belongs to the ad account and the currency it was entered for. For any other account,
+  including one that `META_ADS_AD_ACCOUNT_ID` names, budgets are refused until a person sets the
+  caps again for it.
 - A cap limits each budget, not the account: two ad sets with their own budgets can together spend
   twice the daily cap. Switching each of them on is a separate `--force` decision.
 - Meta may spend up to 175% of a daily budget on a single day, and at most 7 times the daily budget
@@ -390,7 +407,7 @@ omitted when absent. The message is `METHOD path: HTTP status: code/subcode:` fo
 | `auth` | the token is invalid or expired |
 | `forbidden` | the system user lacks a permission or the asset assignment |
 | `not_found` | the object does not exist or is not visible to the system user |
-| `validation` | Meta rejected the request or a field; also a redirect, which is refused rather than followed (the message names the `Location`) |
+| `validation` | Meta rejected the request or a field; also a redirect, which is refused rather than followed (the message names the scheme, host and path of the `Location`, never its query, and `details` is `null`) |
 | `rate_limited` | a rate limit that outlasted the retry budget |
 | `server` | Meta failed or called the error transient |
 | `transport` | a network failure that is safe to retry: the request never reached Meta, or it could not change anything (a read or a `--validate-only` call); also a call cancelled while waiting to retry |
@@ -451,7 +468,11 @@ version (`metaads get v25.0/act/campaigns`) and is sent as given. Marketing API 
 release of metaads keeps working, and a caller can put a newer version into the path.
 
 Moving the default version is a review of Meta's changelog for what the guard checks (new money
-fields, new nested specs, new edges that start delivery), then a minor release.
+fields, new nested specs, new edges that start delivery), then a minor release. The review covers
+not only the money fields of campaigns, ad sets and ads but every object type reachable through
+`POST /<id>`: automated rules, budget schedules, reach and frequency predictions, and the bulk
+edges. `POST /<id>` cannot see the object type, so a new money field on any of them arrives there
+as a plain update.
 
 ## Development
 

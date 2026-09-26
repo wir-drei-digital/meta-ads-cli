@@ -51,10 +51,14 @@ metaads get act/insights --param level=campaign --param 'time_range={"since":"20
   conversation. `--force` is required to start delivery, change an existing budget, delete, and
   call anything outside campaign editing.
 - Budgets above the configured caps are refused whatever the flags, and so is a budget without a
-  matching cap. The account spending limit cannot be changed through metaads.
-- Refused outright: budget schedules, automated rules, reserved buying, bulk deletes, batch
-  requests, and the parameters metaads owns (`method`, `access_token`, `execution_options` and the
-  others listed in `commands --json`).
+  matching cap. Each cap belongs to one ad account: on another account, one named by
+  `META_ADS_AD_ACCOUNT_ID` included, every budget is refused until a person sets caps for it. The
+  account spending limit cannot be changed through metaads.
+- Refused outright: budget schedules and automated rules (creating or editing them), reserved
+  buying, bulk deletes, bulk ad creation (`asyncadrequestsets`), batch requests, and the parameters
+  metaads owns (`method`, `access_token`, `execution_options` and the others listed in
+  `commands --json`).
+- Write edges as Meta spells them, in lowercase: `post` and `delete` refuse `act/Campaigns`.
 
 ## Worked example: a paused campaign with one image ad
 
@@ -115,8 +119,9 @@ metaads get act/insights --param level=campaign --param 'time_range={"since":"20
 - `--force` has no environment variable or config setting on purpose: every spend decision stays a
   visible flag in the transcript.
 - Set the account spending limit and both caps (`metaads config set daily-budget-cap <amount>`,
-  `metaads config set lifetime-budget-cap <amount>`, after `metaads config set currency <code>`)
-  before any agent writes.
+  `metaads config set lifetime-budget-cap <amount>`, after `metaads config set ad-account-id <id>`
+  and `metaads config set currency <code>`) before any agent writes. Each cap belongs to that ad
+  account; for another one, budgets are refused until you set caps for it.
 - The token and the app secret come from `META_ADS_ACCESS_TOKEN` and `META_ADS_APP_SECRET`, or on
   stdin: `printf '%s' "$VALUE" | metaads config set access-token`. A value on the command line is
   refused.
