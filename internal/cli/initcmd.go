@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -45,15 +46,44 @@ func (a *app) initCommand() *cobra.Command {
 	}
 }
 
-// adAccount is what init reads about an ad account. Meta sends spend_cap
-// and amount_spent as strings of digits in the minor unit.
+// adAccount is what init reads about an ad account.
 type adAccount struct {
 	AccountID     string      `json:"account_id"`
 	Name          string      `json:"name"`
 	Currency      string      `json:"currency"`
 	AccountStatus int         `json:"account_status"`
-	SpendCap      json.Number `json:"spend_cap"`
-	AmountSpent   json.Number `json:"amount_spent"`
+	SpendCap      minorAmount `json:"spend_cap"`
+	AmountSpent   minorAmount `json:"amount_spent"`
+}
+
+// minorAmount is an ad account amount in the minor unit. Meta sends it as a
+// string of digits, but sometimes as an empty string or null, which both
+// mean 0; a JSON number is accepted too. Anything else is refused.
+type minorAmount int64
+
+var minorDigits = regexp.MustCompile(`^[0-9]{1,18}$`)
+
+func (m *minorAmount) UnmarshalJSON(b []byte) error {
+	s := string(b)
+	if s == "null" {
+		*m = 0
+		return nil
+	}
+	if strings.HasPrefix(s, `"`) {
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		if s == "" {
+			*m = 0
+			return nil
+		}
+	}
+	if !minorDigits.MatchString(s) {
+		return fmt.Errorf("want an amount in the minor unit as digits, got %s", b)
+	}
+	n, _ := strconv.ParseInt(s, 10, 64) // at most 18 digits: cannot overflow
+	*m = minorAmount(n)
+	return nil
 }
 
 func (a *app) runInit(ctx context.Context, p prompter) error {
@@ -142,9 +172,9 @@ func (a *app) runInit(ctx context.Context, p prompter) error {
 		return api.Usagef("init: %v", err)
 	}
 	fmt.Fprintf(out, "Ad account %s (act_%s), currency %s, status %s.\n", details.Name, id, currency, accountStatus(details.AccountStatus))
-	if limit, _ := details.SpendCap.Int64(); limit > 0 {
-		spent, _ := details.AmountSpent.Int64()
-		fmt.Fprintf(out, "Account spending limit: %s, spent so far: %s.\n", config.FormatMinor(limit, currency), config.FormatMinor(spent, currency))
+	if details.SpendCap > 0 {
+		fmt.Fprintf(out, "Account spending limit: %s, spent so far: %s.\n",
+			config.FormatMinor(int64(details.SpendCap), currency), config.FormatMinor(int64(details.AmountSpent), currency))
 	} else {
 		fmt.Fprintln(out, "Warning: this ad account has no spending limit. Set one in the Business Portfolio's billing settings: it is the ceiling that holds even when --force is used.")
 	}

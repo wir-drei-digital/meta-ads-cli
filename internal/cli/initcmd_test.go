@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -145,5 +146,50 @@ func TestInitBadAppIDIsNotEchoed(t *testing.T) {
 	if code := a.run([]string{"init"}); code != 2 || strings.Contains(errb.String(), "PASTED-APP-SECRET") ||
 		!strings.Contains(errJSON(t, errb)["error"].(string), "app ID") {
 		t.Fatalf("exit %d %s", code, errb)
+	}
+}
+
+// Meta sometimes sends spend_cap and amount_spent as empty strings; that
+// means no limit and nothing spent, not an unreadable account.
+func TestInitEmptySpendCap(t *testing.T) {
+	isolate(t)
+	g := newFakeGraph(t, func(s seen) (int, string) {
+		switch s.Path {
+		case "/v26.0/me/adaccounts":
+			return 200, oneAccount
+		case "/v26.0/act_7":
+			return 200, `{"id":"act_7","name":"Account 7","currency":"CHF","account_status":1,"spend_cap":"","amount_spent":""}`
+		}
+		return 400, `{"error":{"message":"Unsupported get request.","code":100,"error_subcode":33}}`
+	})
+	a, out, errb := testApp(t, g, config.Resolved{})
+	a.isTerminal = func() bool { return true }
+	a.prompt = &fakePrompter{answers: []string{"tok", "", "30", "300"}}
+	if code := a.run([]string{"init"}); code != 0 {
+		t.Fatalf("exit %d %s", code, errb)
+	}
+	if c, _ := config.Load(); c.AdAccountID != "7" || c.DailyCap == nil || c.LifetimeCap == nil {
+		t.Fatalf("%+v", c)
+	}
+	if !strings.Contains(out.String(), "no spending limit") {
+		t.Fatalf("stdout %q", out)
+	}
+}
+
+func TestMinorAmount(t *testing.T) {
+	for _, c := range []struct {
+		in   string
+		want minorAmount
+	}{{`""`, 0}, {`null`, 0}, {`"100000"`, 100000}, {`100000`, 100000}} {
+		var m minorAmount
+		if err := json.Unmarshal([]byte(c.in), &m); err != nil || m != c.want {
+			t.Fatalf("%s: %d %v", c.in, m, err)
+		}
+	}
+	for _, in := range []string{`"abc"`, `"-5"`, `1.5`, `true`} {
+		var m minorAmount
+		if err := json.Unmarshal([]byte(in), &m); err == nil {
+			t.Fatalf("%s was accepted as %d", in, m)
+		}
 	}
 }
