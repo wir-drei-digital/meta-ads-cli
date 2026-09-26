@@ -577,18 +577,30 @@ lives, happens in that workspace and is not part of this repository.
 - Browser (OAuth) login for people, OS keychain storage, human-readable table output, an MCP server
   mode, a Homebrew tap, artifact signing.
 
+## Live check results
+
+The live checks ran on 2026-09-26 against one CHF ad account, with a system user holding
+`ADVERTISE`, `ANALYZE` and `DRAFT` (not `MANAGE`), a non-expiring token and "Require App Secret"
+switched on. Both passed, including the write round trip (a paused campaign created, read back and
+deleted). Settled:
+
+- Meta accepts the token as `Authorization: Bearer`, and `appsecret_proof` in the query, on reads,
+  on a form-encoded create with `execution_options=["validate_only"]`, on a real create and on a
+  delete. `debug_token` accepts the app token the same way. The `access_token` fallback is not
+  needed.
+- This portfolio was not forced onto 60-day tokens: it issued a token that never expires.
+- The Limited access tier carried the checks (about twenty calls) without throttling.
+
 ## Open questions
 
-These need credentials and are settled by the live checks:
+Still open after the live checks:
 
-- Does Meta accept the token as `Authorization: Bearer` on every call this design uses, including
-  multipart uploads and `debug_token`? The fallback is the `access_token` form field for POST and
-  DELETE.
-- Does the `ADVERTISE` task really prevent changing the account spending limit, and does it allow
-  everything the worked example needs (image upload, creative with a Page, ad)?
-- Is the Limited access tier enough for one account with a handful of ads?
-- Does Meta force this portfolio onto 60-day tokens, and does `fb_exchange_token` renew a system user
-  token as documented?
+- Does Meta accept the Bearer header on multipart uploads (`act/adimages`)? No image was uploaded
+  yet.
+- Does the `ADVERTISE` task really prevent changing the account spending limit? The account had no
+  spending limit set, so the check did not run. Does `ADVERTISE` allow everything the worked
+  example needs (image upload, creative with a Page, ad)?
+- Does `fb_exchange_token` renew a system user token as documented? The live token never expires.
 - Which status does Meta assign when a create omits `status`? The CLI gates it either way.
 - Does Meta resolve a capitalised edge such as `Budget_Schedules`? The CLI refuses one for `post`
   and `delete` either way.
