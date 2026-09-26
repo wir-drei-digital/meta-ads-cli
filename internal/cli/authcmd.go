@@ -126,6 +126,11 @@ func (a *app) checkToken(ctx context.Context, s *authStatus) error {
 		}
 		valid := info.IsValid
 		s.IsValid, s.Scopes, s.AdAccounts = &valid, info.Scopes, info.AdAccounts()
+		if !valid {
+			// An invalid token's expires_at is often 0, which would read as
+			// "never"; the recorded expiry stays as it was.
+			return nil
+		}
 		s.TokenExpiresAt = expiryString(info.ExpiresAt)
 		return a.recordExpiry(s.TokenExpiresAt)
 	}

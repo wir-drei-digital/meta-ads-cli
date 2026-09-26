@@ -140,7 +140,7 @@ func (a *app) configCommand() *cobra.Command {
 // secretSetter reads a secret from stdin, never from the command line, which
 // every process on the machine can see.
 func (a *app) secretSetter(use, what, envName string, assign func(*config.Config, string), done string) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   use,
 		Short: "Read the " + what + " from stdin and store it (0600)",
 		Long: "Read the " + what + " from stdin and store it in the config file (0600). It never comes from\n" +
@@ -174,6 +174,12 @@ func (a *app) secretSetter(use, what, envName string, assign func(*config.Config
 			return nil
 		},
 	}
+	// cobra's flag errors quote the argument ("unknown shorthand flag: 'S'
+	// in -SECRET"), which here may be the secret.
+	cmd.SetFlagErrorFunc(func(*cobra.Command, error) error {
+		return api.Usagef("config set %s takes no flags or arguments; pipe the value on stdin: printf '%%s' \"$VALUE\" | metaads config set %s", use, use)
+	})
+	return cmd
 }
 
 // idSetter stores an identifier; assign returns a note for stderr, or "".

@@ -182,3 +182,22 @@ func TestConfigAdAccountChangeWarnsAboutCaps(t *testing.T) {
 		t.Fatalf("stderr %q", errb)
 	}
 }
+
+// cobra's own flag errors quote the argument ("unknown shorthand flag: 'S'
+// in -SECRETVALUE"); for the secret setters that argument can be the secret.
+func TestConfigSecretSetterFlagErrorIsNotEchoed(t *testing.T) {
+	isolate(t)
+	a, _, errb := testApp(t, nil, config.Resolved{})
+	for _, k := range []string{"access-token", "app-secret"} {
+		for _, arg := range []string{"-SECRETVALUE", "--SECRETVALUE", "--SECRETVALUE=x", "--timeout=SECRETVALUE"} {
+			errb.Reset()
+			if code := a.run([]string{"config", "set", k, arg}); code != 2 || strings.Contains(errb.String(), "SECRETVALUE") ||
+				!strings.Contains(errJSON(t, errb)["error"].(string), "config set "+k+" takes no flags or arguments; pipe the value on stdin") {
+				t.Fatalf("%s %s: exit %d %s", k, arg, code, errb)
+			}
+		}
+	}
+	if c, _ := config.Load(); c.AccessToken != "" || c.AppSecret != "" {
+		t.Fatalf("%+v", c)
+	}
+}

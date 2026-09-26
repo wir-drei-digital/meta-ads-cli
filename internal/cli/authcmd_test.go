@@ -148,3 +148,29 @@ func TestAuthStatusCapForAnotherAccount(t *testing.T) {
 		t.Fatalf("%s", out)
 	}
 }
+
+// debug_token reports expires_at 0 for a token that is no longer valid,
+// which would read as "never". Only a valid token's expiry is recorded; an
+// invalid one leaves the stored expiry as it was.
+func TestAuthStatusCheckInvalidTokenKeepsExpiry(t *testing.T) {
+	isolate(t)
+	const stored = "2026-12-01T00:00:00Z"
+	if err := config.Save(config.Config{AccessToken: "tok", AppID: "42", AppSecret: "sec", TokenExpiresAt: stored}); err != nil {
+		t.Fatal(err)
+	}
+	g := newFakeGraph(t, func(s seen) (int, string) {
+		return 200, `{"data":{"is_valid":false,"expires_at":0,"error":{"code":190,"message":"Error validating access token: Session has expired"}}}`
+	})
+	res := defaultRes()
+	res.TokenFrom, res.AppID, res.AppSecret, res.TokenExpiresAt = "config", "42", "sec", stored
+	a, out, errb := testApp(t, g, res)
+	if code := a.run([]string{"auth", "status", "--check"}); code != 0 {
+		t.Fatalf("exit %d %s", code, errb)
+	}
+	if s := status(t, out.String()); s["is_valid"] != false || s["token_expires_at"] != stored {
+		t.Fatalf("%s", out)
+	}
+	if c, _ := config.Load(); c.TokenExpiresAt != stored {
+		t.Fatalf("the stored expiry changed: %+v", c)
+	}
+}
