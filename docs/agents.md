@@ -27,6 +27,8 @@ metaads get act/insights --param level=campaign --param 'time_range={"since":"20
 - `--fields` selects fields; `--param key=value` adds query parameters. Write JSON-valued ones
   (`time_range`, `filtering`, `breakdowns`) as JSON.
 - `--all` follows the cursor and prints one JSON array of every `data` entry.
+- Drafts in Ads Manager are invisible to the API until a person publishes them. An empty
+  `act/campaigns` while someone sees a draft in Ads Manager is expected, not an error.
 - Insights `spend` is a decimal string in the account currency (major units). Budgets are whole
   numbers in the minor unit.
 - A large insights query can run as a report: `metaads post act/insights --data '{"level":"ad","date_preset":"last_30d","fields":"ad_name,spend"}'`

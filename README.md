@@ -232,6 +232,11 @@ accepted the call, the response goes to stdout and the exit is 1 with kind `outp
 page. `--max-pages` (default 100) caps it; hitting the cap with data left prints the partial array
 and exits 1 with kind `incomplete`.
 
+Drafts in Ads Manager are invisible to the API until they are published: Meta creates the campaign,
+ad set and ad objects only on publishing, and no endpoint lists unpublished drafts. A campaign that
+shows as a draft in Ads Manager is therefore missing from `get act/campaigns`. Publish it with the
+toggle off to get paused objects the API can see, or build the campaign with `metaads` directly.
+
 Global flags: `--timeout` (per attempt, default 60s) and `--verbose` (method, path, status and
 response size on stderr; never a credential or a query string).
 
